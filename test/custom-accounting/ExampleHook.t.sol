@@ -27,7 +27,7 @@ contract ExampleHookTest is Test, Deployers {
         initializeManagerRoutersAndPoolsWithLiq(IHooks(address(0)));
     }
 
-    function test_exampleHook_beforeSwap() public {
+    function testExampleHookBeforeSwap() public {
         // TODO: This is where you pass in your hook's implementation.
         address impl = address(new ExampleHook(manager));
         _setUpBeforeSwapHook(impl);
@@ -108,7 +108,7 @@ contract ExampleHookTest is Test, Deployers {
 
     /// INTERNAL HELPER FUNCTIONS ///
 
-    function _printTestType(bool zeroForOne, int256 amountSpecified) internal {
+    function _printTestType(bool zeroForOne, int256 amountSpecified) internal pure {
         console2.log("--- TEST TYPE ---");
         string memory zeroForOneString = zeroForOne ? "zeroForOne" : "oneForZero";
         string memory swapType = amountSpecified < 0 ? "exactInput" : "exactOutput";
@@ -131,7 +131,7 @@ contract ExampleHookTest is Test, Deployers {
         (key,) = initPoolAndAddLiquidity(currency0, currency1, IHooks(hook), 100, SQRT_PRICE_1_1);
     }
 
-    function _defaultTestSettings() internal returns (PoolSwapTest.TestSettings memory testSetting) {
+    function _defaultTestSettings() internal pure returns (PoolSwapTest.TestSettings memory testSetting) {
         return PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
     }
 

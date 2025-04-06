@@ -45,7 +45,7 @@ contract CounterTest is Test, Fixtures {
         tickUpper = TickMath.maxUsableTick(key.tickSpacing);
     }
 
-    function test_mintLiquidity() public {
+    function testMintLiquidity() public {
         uint256 liquidityToMint = 100e18;
         address recipient = address(this);
 
@@ -71,7 +71,7 @@ contract CounterTest is Test, Fixtures {
         assertEq(delta.amount1(), -int128(uint128(amount1 + 1 wei)));
     }
 
-    function test_mintLiquidityNative() public {
+    function testMintLiquidityNative() public {
         uint256 liquidityToMint = 100e18;
         address recipient = address(this);
 
@@ -98,7 +98,7 @@ contract CounterTest is Test, Fixtures {
         assertEq(delta.amount1(), -int128(uint128(amount1 + 1 wei)));
     }
 
-    function test_increaseLiquidity() public {
+    function testIncreaseLiquidity() public {
         (uint256 tokenId,) = posm.mint(
             key,
             tickLower,
@@ -132,7 +132,7 @@ contract CounterTest is Test, Fixtures {
         assertEq(delta.amount1(), -int128(uint128(amount1 + 1 wei)));
     }
 
-    function test_increaseLiquidityNative() public {
+    function testIncreaseLiquidityNative() public {
         uint256 liquidityToMint = 100e18;
         address recipient = address(this);
 
@@ -173,7 +173,7 @@ contract CounterTest is Test, Fixtures {
         assertEq(delta.amount1(), -int128(uint128(amount1 + 1 wei)));
     }
 
-    function test_decreaseLiquidity() public {
+    function testDecreaseLiquidity() public {
         (uint256 tokenId,) = posm.mint(
             key,
             tickLower,
@@ -208,7 +208,7 @@ contract CounterTest is Test, Fixtures {
         assertEq(delta.amount1(), int128(uint128(amount1)));
     }
 
-    function test_burn() public {
+    function testBurn() public {
         (uint256 tokenId, BalanceDelta mintDelta) = posm.mint(
             key,
             tickLower,
@@ -233,7 +233,7 @@ contract CounterTest is Test, Fixtures {
         assertEq(delta.amount1(), -mintDelta.amount1() - 1 wei);
     }
 
-    function test_collect() public {
+    function testCollect() public {
         (uint256 tokenId,) = posm.mint(
             key,
             tickLower,
