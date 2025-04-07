@@ -15,11 +15,16 @@ import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
 import {BalanceDelta, BalanceDeltaLibrary, toBalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary, toBeforeSwapDelta} from "v4-core/src/types/BeforeSwapDelta.sol";
 
+import {IPositionManager} from "v4-periphery/src/interfaces/IPositionManager.sol";
+import {PositionInfo, PositionInfoLibrary} from "v4-periphery/src/libraries/PositionInfoLibrary.sol";
 import {BaseHook} from "v4-periphery/src/utils/BaseHook.sol";
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Owned} from "solmate/src/auth/Owned.sol";
+
+import {PriceUpdate} from "./types/PriceUpdate.sol";
+import {Reward, RewardQueue} from "./types/Reward.sol";
 
 function abs24(int24 x) pure returns (int24) {
     return x < 0 ? -x : x;
@@ -29,16 +34,27 @@ function abs(int256 x) pure returns (int256) {
     return x < 0 ? -x : x;
 }
 
+function max(int256 x, int256 y) pure returns (int256) {
+	return x <= y ? y : x;
+}
+
+function min(int256 x, int256 y) pure returns (int256) {
+	return x <= y ? x : y;
+}
+
 contract DesiredPricePool is BaseHook, Owned {
     using StateLibrary for IPoolManager;
     using PoolIdLibrary for PoolKey;
     using BalanceDeltaLibrary for BalanceDelta;
+    using PositionInfoLibrary for PositionInfo;
     using CustomRevert for bytes4;
     using SafeCast for uint256;
 	using SafeCast for int256;
 
     error UnauthorizedPoolInitialization();
     error UnexpectedReentrancy();
+    error InvalidPositionId(uint256 positionId);
+	error InvalidTickBounds(int24 tickLower, int24 tickUpper, int24 tickSpacing);
 
     /// @notice The rate of fee per tick managed by Uniswap V4 in pips.
     uint24 public constant DEFAULT_BASE_FEE_PER_TICK = 30;
@@ -46,6 +62,7 @@ contract DesiredPricePool is BaseHook, Owned {
     uint8 public constant DEFAULT_HOOK_FEE = 25;
 	/// @notice The maximum tick spacing for the pool.
 	int24 public constant MAX_TICK_SPACING = 200;
+	uint24 public constant REWARD_LOCK_PERIOD = 1 days;
 
     int24 private BEFORE_SWAP_TICK_ZERO = TickMath.MAX_TICK + 1;
 
@@ -58,10 +75,24 @@ contract DesiredPricePool is BaseHook, Owned {
     mapping(PoolId => uint24 pip) public baseFees;
     mapping(PoolId => uint8 percent) public hookFees;
 
+    mapping(PoolId => BalanceDelta) internal feesCollected;
+	mapping(PoolId => uint256) internal totalWeights;
+	mapping(PoolId => uint24) internal priceUpdateIds;
+	mapping(PoolId => mapping(uint24 => PriceUpdate)) internal priceUpdates;
+    mapping(uint256 positionId => RewardQueue) internal rewards;
+	mapping(uint256 positionId => uint256) collectableRewards;
+
+    IPositionManager public immutable posm;
+
     int24 private _beforeSwapTick;
     uint24 private _swapFee;
 
-    constructor(IPoolManager _poolManager, address _owner) BaseHook(_poolManager) Owned(_owner) {}
+    constructor(IPoolManager _poolManager, IPositionManager _positionManager, address _owner)
+        BaseHook(_poolManager)
+        Owned(_owner)
+    {
+        posm = _positionManager;
+    }
 
     function createPool(
         Currency _currency0,
@@ -86,9 +117,9 @@ contract DesiredPricePool is BaseHook, Owned {
         PoolId id = key.toId();
 
         require(baseFees[id] == 0, "Pool already exists");
-        desiredPriceTicks[id] = _desiredPriceTick;
         baseFees[id] = uint24(_tickSpacing) * DEFAULT_BASE_FEE_PER_TICK;
         hookFees[id] = DEFAULT_HOOK_FEE;
+		_setDesiredPrice(id, _desiredPriceTick);
 
         poolManager.initialize(key, _sqrtPriceX96);
     }
@@ -97,10 +128,10 @@ contract DesiredPricePool is BaseHook, Owned {
         return Hooks.Permissions({
             beforeInitialize: true,
             afterInitialize: false,
-            beforeAddLiquidity: false,
-            afterAddLiquidity: true,
-            beforeRemoveLiquidity: false,
-            afterRemoveLiquidity: true,
+            beforeAddLiquidity: true,
+            afterAddLiquidity: false,
+            beforeRemoveLiquidity: true,
+            afterRemoveLiquidity: false,
             beforeSwap: true,
             afterSwap: true,
             beforeDonate: false,
@@ -183,25 +214,182 @@ contract DesiredPricePool is BaseHook, Owned {
         return (BaseHook.afterSwap.selector, hookFeeAmountInt128);
     }
 
-    function _afterAddLiquidity(
+    function _beforeAddLiquidity(
         address,
-        PoolKey calldata,
-        IPoolManager.ModifyLiquidityParams calldata,
-        BalanceDelta,
-        BalanceDelta,
-        bytes calldata
-    ) internal override returns (bytes4, BalanceDelta) {
-        revert HookNotImplemented();
+        PoolKey calldata key,
+        IPoolManager.ModifyLiquidityParams calldata params,
+        bytes calldata hookData
+    ) internal override returns (bytes4) {
+		_verifyTickBounds(params.tickLower, params.tickUpper, key.tickSpacing);
+
+        PoolId id = key.toId();
+        int256 desiredPrice = desiredPriceTicks[id];
+		int256 rewardRange = _checkRewardRange(desiredPrice, params.tickLower, params.tickUpper, key.tickSpacing);
+		if (rewardRange == 0) {
+			return BaseHook.beforeAddLiquidity.selector;
+		}
+
+		uint256 positionId = _verifyPositionId(id, params, hookData);
+        uint256 weight = _calculateWeight(params, desiredPrice, key.tickSpacing, rewardRange);
+		uint40 timestamp = block.timestamp.toUint40();
+		RewardQueue storage queue = rewards[positionId];
+		bool done = false;
+		if (!queue.empty()) {
+			uint128 endIdx = queue.end - 1;
+			Reward memory latest = queue.data[endIdx];
+			if (latest.timestamp == timestamp) {
+				latest.weight += weight;
+				queue.data[endIdx] = latest;
+				done = true;
+			}
+		}
+		if (!done) {
+			uint24 currentId = priceUpdateIds[id] - 1;
+			Reward memory reward = Reward({
+				timestamp: timestamp,
+				priceUpdateId: currentId,
+				lockPeriod: REWARD_LOCK_PERIOD,
+				weight: weight
+			});
+			queue.pushLatest(reward);
+		}
+		totalWeights[id] += weight;
+        return BaseHook.beforeAddLiquidity.selector;
     }
 
-    function _afterRemoveLiquidity(
+    function _beforeRemoveLiquidity(
         address,
-        PoolKey calldata,
-        IPoolManager.ModifyLiquidityParams calldata,
-        BalanceDelta,
-        BalanceDelta,
-        bytes calldata
-    ) internal override returns (bytes4, BalanceDelta) {
-        revert HookNotImplemented();
+        PoolKey calldata key,
+        IPoolManager.ModifyLiquidityParams calldata params,
+        bytes calldata hookData
+    ) internal override returns (bytes4) {
+		_verifyTickBounds(params.tickLower, params.tickUpper, key.tickSpacing);
+
+        PoolId id = key.toId();
+        int256 desiredPrice = desiredPriceTicks[id];
+		int256 rewardRange = _checkRewardRange(desiredPrice, params.tickLower, params.tickUpper, key.tickSpacing);
+		if (rewardRange == 0) {
+			return BaseHook.beforeAddLiquidity.selector;
+		}
+
+		uint256 positionId = _verifyPositionId(id, params, hookData);
+		RewardQueue storage queue = rewards[positionId];
+		if (queue.empty()) {
+			return BaseHook.beforeRemoveLiquidity.selector;
+		}
+
+		uint40 timestamp = block.timestamp.toUint40();
+        uint256 weight = _calculateWeight(params, desiredPrice, key.tickSpacing, rewardRange);
+		uint256 remainingWeight = weight;
+		uint128 endIdx = queue.end - 1;
+		Reward memory latest = queue.data[endIdx];
+		if (latest.timestamp == timestamp) {
+			if (latest.weight > weight) {
+				latest.weight -= weight;
+				queue.data[endIdx] = latest;
+				remainingWeight = 0;
+			}
+			else {
+				remainingWeight -= latest.weight;
+				queue.popLatest();
+			}
+		}
+		if (remainingWeight > 0 && !_updateCollectableReward(positionId, timestamp)) {
+			do {
+				Reward memory earliest = queue.peekEarliest();
+				if (earliest.weight > remainingWeight) {
+					earliest.weight -= remainingWeight;
+					queue.data[queue.begin] = earliest;
+					remainingWeight = 0;
+				}
+				else {
+					remainingWeight -= earliest.weight;
+					queue.popEarliest();
+				}
+			} while (!queue.empty() && remainingWeight > 0);
+		}
+		totalWeights[id] -= weight - remainingWeight;
+        return BaseHook.beforeRemoveLiquidity.selector;
     }
+
+	function _setDesiredPrice(PoolId id, int24 desiredPrice) private {
+		PriceUpdate memory update = PriceUpdate({
+			timestamp: block.timestamp.toUint40(),
+			oldPriceTick: desiredPriceTicks[id],
+			newPriceTick: desiredPrice
+		});
+		uint24 nextId = priceUpdateIds[id];
+		priceUpdates[id][nextId] = update;
+		priceUpdateIds[id] = nextId + 1;
+		desiredPriceTicks[id] = desiredPrice;
+	}
+
+	function _verifyTickBounds(int24 tickLower, int24 tickUpper, int24 tickSpacing) internal pure {
+		if (tickLower >= tickUpper) {
+			revert InvalidTickBounds(tickLower, tickUpper, tickSpacing);
+		}
+		if (tickLower % tickSpacing != 0 || tickUpper % tickSpacing != 0) {
+			revert InvalidTickBounds(tickLower, tickUpper, tickSpacing);
+		}
+		if (abs24(tickLower) > TickMath.MAX_TICK || abs24(tickUpper) > TickMath.MAX_TICK) {
+			revert InvalidTickBounds(tickLower, tickUpper, tickSpacing);
+		}
+	}
+
+	function _checkRewardRange(int256 desiredPrice, int24 tickLower, int24 tickUpper, int24 _tickSpacing) internal pure returns (int256 rewardRange) {
+		uint256 tickSpacing = uint24(_tickSpacing);
+		int256 range = ((Math.log2(tickSpacing) + 2) * uint24(MAX_TICK_SPACING) >> 2).toInt256();
+		return tickLower < desiredPrice - range || tickUpper >= desiredPrice + range ? int256(0) : range;
+	}
+
+	function _verifyPositionId(
+		PoolId id,
+		IPoolManager.ModifyLiquidityParams calldata params,
+		bytes calldata hookData
+	) internal view returns (uint256 positionId) {
+        positionId = abi.decode(hookData, (uint256));
+        PositionInfo position = posm.positionInfo(positionId);
+        bytes25 positionPoolId = position.poolId();
+        if (positionPoolId != bytes25(PoolId.unwrap(id))) {
+            revert InvalidPositionId(positionId);
+        }
+        if (position.tickLower() != params.tickLower || position.tickUpper() != params.tickUpper) {
+            revert InvalidPositionId(positionId);
+        }
+    }
+
+    function _calculateWeight(
+		IPoolManager.ModifyLiquidityParams calldata params,
+		int256 desiredPrice,
+		int24 tickSpacing,
+		int256 rewardRange
+	) internal pure returns (uint256 weight) {
+		int256 left = max(params.tickLower, desiredPrice - rewardRange);
+		int256 right = min(params.tickUpper, desiredPrice + rewardRange + tickSpacing);
+        uint256 factor = Math.sqrt(int256(tickSpacing).toUint256() << 232) << 2;
+		uint256 sum = 0;
+		for (int256 i = left; i < right; i += tickSpacing) {
+			sum += (factor << 16) / (factor + (int256(abs(i - desiredPrice)).toUint256() << 116));
+		}
+		return (sum * abs(params.liquidityDelta).toUint256()) >> 16;
+    }
+
+	function _updateCollectableReward(uint256 positionId, uint40 timestamp) internal returns (bool empty) {
+		RewardQueue storage queue = rewards[positionId];
+		if (queue.empty()) {
+			return true;
+		}
+		uint256 collectable = collectableRewards[positionId];
+		empty = true;
+		do {
+			Reward memory earliest = queue.peekEarliest();
+			if (earliest.timestamp + earliest.lockPeriod > timestamp) {
+				empty = false;
+				break;
+			}
+			collectable += earliest.weight;
+			queue.popEarliest();
+		} while (!queue.empty());
+		collectableRewards[positionId] = collectable;
+	}
 }
