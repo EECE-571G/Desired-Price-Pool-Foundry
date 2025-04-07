@@ -26,14 +26,14 @@ library BeforeSwapInfoLibrary {
     BeforeSwapInfo public constant UNSET = BeforeSwapInfo.wrap(type(int24).max << 24);
 
     function tick(BeforeSwapInfo beforeSwapInfo) internal pure returns (int24 _tick) {
-		assembly ("memory-safe") {
-			_tick := and(shr(24, beforeSwapInfo), 0xFFFFFF)
-		}
+        assembly ("memory-safe") {
+            _tick := and(shr(24, beforeSwapInfo), 0xFFFFFF)
+        }
     }
 
     function swapFee(BeforeSwapInfo beforeSwapInfo) internal pure returns (uint24 _swapFee) {
-		assembly ("memory-safe") {
-			_swapFee := and(beforeSwapInfo, 0xFFFFFF)
-		}
+        assembly ("memory-safe") {
+            _swapFee := and(beforeSwapInfo, 0xFFFFFF)
+        }
     }
 }

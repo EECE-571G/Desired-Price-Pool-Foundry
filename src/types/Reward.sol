@@ -4,9 +4,9 @@ pragma solidity ^0.8.0;
 struct Reward {
     /// @notice The timestamp when the reward was created, i.e. when liquidity was added
     uint40 timestamp;
-	/// @notice Time required to unlock the reward, in seconds
+    /// @notice Time required to unlock the reward, in seconds
     uint32 lockPeriod;
-	uint24 priceUpdateId;
+    uint24 priceUpdateId;
     /// @notice The weight of the reward, used to calculate the reward amount
     uint256 weight;
 }
@@ -34,12 +34,12 @@ library RewardQueueLibrary {
         }
     }
 
-	function popLatest(RewardQueue storage queue) internal returns (Reward memory value) {
+    function popLatest(RewardQueue storage queue) internal returns (Reward memory value) {
         unchecked {
             uint128 end = queue.end;
             if (end == queue.begin) {
-				revert QueueEmpty();
-			}
+                revert QueueEmpty();
+            }
             --end;
             value = queue.data[end];
             delete queue.data[end];
@@ -59,25 +59,25 @@ library RewardQueueLibrary {
         }
     }
 
-	function peekEarliest(RewardQueue storage queue) internal view returns (Reward memory value) {
-		unchecked {
-			uint128 begin = queue.begin;
-			if (begin == queue.end) {
-				revert QueueEmpty();
-			}
-			value = queue.data[begin];
-		}
-	}
+    function peekEarliest(RewardQueue storage queue) internal view returns (Reward memory value) {
+        unchecked {
+            uint128 begin = queue.begin;
+            if (begin == queue.end) {
+                revert QueueEmpty();
+            }
+            value = queue.data[begin];
+        }
+    }
 
-	function peekLatest(RewardQueue storage queue) internal view returns (Reward memory value) {
-		unchecked {
-			uint128 end = queue.end;
-			if (end == queue.begin) {
-				revert QueueEmpty();
-			}
-			value = queue.data[end - 1];
-		}
-	}
+    function peekLatest(RewardQueue storage queue) internal view returns (Reward memory value) {
+        unchecked {
+            uint128 end = queue.end;
+            if (end == queue.begin) {
+                revert QueueEmpty();
+            }
+            value = queue.data[end - 1];
+        }
+    }
 
     /**
      * @dev Returns the number of items in the queue.
