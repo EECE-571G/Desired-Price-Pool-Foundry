@@ -21,6 +21,8 @@ import {BaseHook} from "v4-periphery/src/utils/BaseHook.sol";
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {Owned} from "solmate/src/auth/Owned.sol";
 
 import {PriceUpdate} from "./types/PriceUpdate.sol";
@@ -42,7 +44,7 @@ function min(int256 x, int256 y) pure returns (int256) {
 	return x <= y ? x : y;
 }
 
-contract DesiredPricePool is BaseHook, Owned {
+contract DesiredPricePool is BaseHook, Owned, ReentrancyGuard {
     using StateLibrary for IPoolManager;
     using PoolIdLibrary for PoolKey;
     using BalanceDeltaLibrary for BalanceDelta;
@@ -55,6 +57,8 @@ contract DesiredPricePool is BaseHook, Owned {
     error UnexpectedReentrancy();
     error InvalidPositionId(uint256 positionId);
 	error InvalidTickBounds(int24 tickLower, int24 tickUpper, int24 tickSpacing);
+	error InvalidAddress(address addr);
+	error NotPositionOwner(address owner, address sender);
 
     /// @notice The rate of fee per tick managed by Uniswap V4 in pips.
     uint24 public constant DEFAULT_BASE_FEE_PER_TICK = 30;
@@ -124,6 +128,61 @@ contract DesiredPricePool is BaseHook, Owned {
         poolManager.initialize(key, _sqrtPriceX96);
     }
 
+	function getCollectableRewardWeight(uint256 positionId) external returns (uint256 weight) {
+		uint40 timestamp = block.timestamp.toUint40();
+		(, weight) = _updateCollectableReward(positionId, timestamp);
+	}
+
+	function calculateReward(PoolKey calldata key, uint256 weight) external view returns (uint256 amount0, uint256 amount1) {
+		PoolId id = key.toId();
+		(amount0, amount1, , ) = _calculateReward(id, key.currency0, key.currency1, weight);
+	}
+
+	function calculateReward(uint256 positionId, uint256 weight) external view returns (uint256 amount0, uint256 amount1) {
+		(PoolKey memory key, ) = posm.getPoolAndPositionInfo(positionId);
+		PoolId id = key.toId();
+		(amount0, amount1, , ) = _calculateReward(id, key.currency0, key.currency1, weight);
+	}
+
+	function calculateReward(uint256 positionId) external returns (uint256 amount0, uint256 amount1) {
+		(PoolKey memory key, ) = posm.getPoolAndPositionInfo(positionId);
+		PoolId id = key.toId();
+		uint40 timestamp = block.timestamp.toUint40();
+		(, uint256 weight) = _updateCollectableReward(positionId, timestamp);
+		(amount0, amount1, , ) = _calculateReward(id, key.currency0, key.currency1, weight);
+	}
+
+	function collectReward(uint256 positionId, address recipient) external nonReentrant {
+		if (recipient == address(0)) {
+			InvalidAddress.selector.revertWith(recipient);
+		}
+		IERC721 positionToken = IERC721(address(posm));
+		address owner = positionToken.ownerOf(positionId);
+		if (msg.sender != owner) {
+			NotPositionOwner.selector.revertWith(msg.sender, owner);
+		}
+		uint40 timestamp = block.timestamp.toUint40();
+		(, uint256 collectable) = _updateCollectableReward(positionId, timestamp);
+		if (collectable == 0) {
+			return;
+		}
+
+		(PoolKey memory key, ) = posm.getPoolAndPositionInfo(positionId);
+		PoolId id = key.toId();
+		(uint256 amountToSend0, uint256 amountToSend1, uint256 totalWeight, BalanceDelta fees) =
+			_calculateReward(id, key.currency0, key.currency1, collectable);
+
+		collectableRewards[positionId] = 0;
+		totalWeights[id] = totalWeight - collectable;
+		feesCollected[id] = fees - toBalanceDelta(amountToSend0.toInt256().toInt128(), amountToSend1.toInt256().toInt128());
+		if (amountToSend0 > 0) {
+			key.currency0.transfer(recipient, amountToSend0);
+		}
+		if (amountToSend1 > 0) {
+			key.currency1.transfer(recipient, amountToSend1);
+		}
+	}
+
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
             beforeInitialize: true,
@@ -142,6 +201,25 @@ contract DesiredPricePool is BaseHook, Owned {
             afterRemoveLiquidityReturnDelta: false
         });
     }
+
+	function _calculateReward(
+		PoolId id,
+		Currency currency0,
+		Currency currency1,
+		uint256 weight
+	) internal view returns (uint256 amount0, uint256 amount1, uint256 totalWeight, BalanceDelta fees) {
+		totalWeight = totalWeights[id];
+		fees = feesCollected[id];
+		if (totalWeight == 0) {
+			return (0, 0, totalWeight, fees);
+		}
+		uint256 fees0 = uint128(fees.amount0());
+		uint256 fees1 = uint128(fees.amount1());
+		uint256 balance0 = currency0.balanceOfSelf();
+		uint256 balance1 = currency1.balanceOfSelf();
+		amount0 = Math.min(balance0, fees0) * weight / totalWeight;
+		amount1 = Math.min(balance1, fees1) * weight / totalWeight;
+	}
 
     function _beforeInitialize(address sender, PoolKey calldata key, uint160) internal view override returns (bytes4) {
         PoolId id = key.toId();
@@ -294,19 +372,22 @@ contract DesiredPricePool is BaseHook, Owned {
 				queue.popLatest();
 			}
 		}
-		if (remainingWeight > 0 && !_updateCollectableReward(positionId, timestamp)) {
-			do {
-				Reward memory earliest = queue.peekEarliest();
-				if (earliest.weight > remainingWeight) {
-					earliest.weight -= remainingWeight;
-					queue.data[queue.begin] = earliest;
-					remainingWeight = 0;
-				}
-				else {
-					remainingWeight -= earliest.weight;
-					queue.popEarliest();
-				}
-			} while (!queue.empty() && remainingWeight > 0);
+		if (remainingWeight > 0) {
+			(bool empty, ) = _updateCollectableReward(positionId, timestamp);
+			if (!empty) {
+				do {
+					Reward memory earliest = queue.peekEarliest();
+					if (earliest.weight > remainingWeight) {
+						earliest.weight -= remainingWeight;
+						queue.data[queue.begin] = earliest;
+						remainingWeight = 0;
+					}
+					else {
+						remainingWeight -= earliest.weight;
+						queue.popEarliest();
+					}
+				} while (!queue.empty() && remainingWeight > 0);
+			}
 		}
 		totalWeights[id] -= weight - remainingWeight;
         return BaseHook.beforeRemoveLiquidity.selector;
@@ -374,12 +455,12 @@ contract DesiredPricePool is BaseHook, Owned {
 		return (sum * abs(params.liquidityDelta).toUint256()) >> 16;
     }
 
-	function _updateCollectableReward(uint256 positionId, uint40 timestamp) internal returns (bool empty) {
+	function _updateCollectableReward(uint256 positionId, uint40 timestamp) internal returns (bool empty, uint256 collectable) {
 		RewardQueue storage queue = rewards[positionId];
+		collectable = collectableRewards[positionId];
 		if (queue.empty()) {
-			return true;
+			return (true, collectable);
 		}
-		uint256 collectable = collectableRewards[positionId];
 		empty = true;
 		do {
 			Reward memory earliest = queue.peekEarliest();
