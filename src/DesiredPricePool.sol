@@ -25,6 +25,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {Owned} from "solmate/src/auth/Owned.sol";
 
+import {BeforeSwapInfo, BeforeSwapInfoLibrary, toBeforeSwapInfo} from "./types/BeforeSwapInfo.sol";
 import {PriceUpdate} from "./types/PriceUpdate.sol";
 import {Reward, RewardQueue} from "./types/Reward.sol";
 
@@ -68,8 +69,6 @@ contract DesiredPricePool is BaseHook, Owned, ReentrancyGuard {
 	int24 public constant MAX_TICK_SPACING = 200;
 	uint24 public constant REWARD_LOCK_PERIOD = 1 days;
 
-    int24 private BEFORE_SWAP_TICK_ZERO = TickMath.MAX_TICK + 1;
-
     // NOTE: ---------------------------------------------------------
     // state variables should typically be unique to a pool
     // a single hook contract should be able to service multiple pools
@@ -88,8 +87,7 @@ contract DesiredPricePool is BaseHook, Owned, ReentrancyGuard {
 
     IPositionManager public immutable posm;
 
-    int24 private _beforeSwapTick;
-    uint24 private _swapFee;
+	BeforeSwapInfo private _beforeSwapInfo = BeforeSwapInfoLibrary.UNSET;
 
     constructor(IPoolManager _poolManager, IPositionManager _positionManager, address _owner)
         BaseHook(_poolManager)
@@ -234,17 +232,18 @@ contract DesiredPricePool is BaseHook, Owned, ReentrancyGuard {
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
-        if (_beforeSwapTick != 0) {
+		BeforeSwapInfo beforeSwapInfo = _beforeSwapInfo;
+        if (beforeSwapInfo != BeforeSwapInfoLibrary.UNSET) {
             UnexpectedReentrancy.selector.revertWith();
         }
         PoolId id = key.toId();
-        (, int24 currentTick, uint24 protocolFee,) = poolManager.getSlot0(id);
-		_beforeSwapTick = currentTick == 0 ? BEFORE_SWAP_TICK_ZERO : currentTick;
+        (, int24 priceTick, uint24 protocolFee,) = poolManager.getSlot0(id);
         uint16 currentProtocolFee = swapParams.zeroForOne
             ? ProtocolFeeLibrary.getZeroForOneFee(protocolFee)
             : ProtocolFeeLibrary.getOneForZeroFee(protocolFee);
         uint24 fee = baseFees[id];
-        _swapFee = ProtocolFeeLibrary.calculateSwapFee(currentProtocolFee, fee);
+        uint24 swapFee = ProtocolFeeLibrary.calculateSwapFee(currentProtocolFee, fee);
+        _beforeSwapInfo = toBeforeSwapInfo(priceTick, swapFee);
         return (BaseHook.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, fee | LPFeeLibrary.OVERRIDE_FEE_FLAG);
     }
 
@@ -255,14 +254,8 @@ contract DesiredPricePool is BaseHook, Owned, ReentrancyGuard {
         BalanceDelta delta,
         bytes calldata
     ) internal override returns (bytes4, int128) {
-		int24 beforeSwapTick = _beforeSwapTick;
-		uint256 swapFee = _swapFee;
-		_beforeSwapTick = 0;
-		_swapFee = 0;
-        if (beforeSwapTick == 0) {
-            UnexpectedReentrancy.selector.revertWith();
-        }
-		beforeSwapTick = beforeSwapTick == BEFORE_SWAP_TICK_ZERO ? int24(0) : beforeSwapTick;
+		BeforeSwapInfo beforeSwapInfo = _beforeSwapInfo;
+		_beforeSwapInfo = BeforeSwapInfoLibrary.UNSET;
 
         PoolId id = key.toId();
         bool chargeCurrency1 = swapParams.zeroForOne == (swapParams.amountSpecified < 0);
@@ -270,11 +263,11 @@ contract DesiredPricePool is BaseHook, Owned, ReentrancyGuard {
         uint24 baseFee = baseFees[id];
         uint24 hookFeePip = baseFee * hookFees[id] / 100;
         uint256 hookFeeAmountBase =
-            abs(int256(deltaUnspecified)).toUint256() * (1e6 - swapFee) * uint256(hookFeePip) / 1e12;
+            abs(int256(deltaUnspecified)).toUint256() * (1e6 - beforeSwapInfo.swapFee()) * uint256(hookFeePip) / 1e12;
 
         (, int24 afterSwapTick,,) = poolManager.getSlot0(id);
         int24 desiredPrice = desiredPriceTicks[id];
-        int24 tickDiff = abs24(afterSwapTick - desiredPrice) - abs24(beforeSwapTick - desiredPrice);
+        int24 tickDiff = abs24(afterSwapTick - desiredPrice) - abs24(beforeSwapInfo.tick() - desiredPrice);
 
         uint256 hookFeeAmount; // 1 / (1 + tickDiff / (4 * sqrt(tickSpacing)))
         if (tickDiff == 0) {
