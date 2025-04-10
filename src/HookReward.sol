@@ -2,7 +2,6 @@
 pragma solidity ^0.8.24;
 
 import {CustomRevert} from "v4-core/src/libraries/CustomRevert.sol";
-import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
@@ -30,7 +29,6 @@ abstract contract HookReward is DesiredPrice, ReentrancyGuard {
     using SafeCast for int256;
 
     error InvalidPositionId(uint256 positionId);
-    error InvalidTickBounds(int24 tickLower, int24 tickUpper, int24 tickSpacing);
     error InvalidAddress(address addr);
     error NotPositionOwner(address owner, address sender);
 
@@ -200,18 +198,6 @@ abstract contract HookReward is DesiredPrice, ReentrancyGuard {
                 }
             }
             totalWeights[id] -= weight - remainingWeight;
-        }
-    }
-
-    function _verifyTickBounds(int24 tickLower, int24 tickUpper, int24 tickSpacing) internal pure {
-        if (tickLower >= tickUpper) {
-            revert InvalidTickBounds(tickLower, tickUpper, tickSpacing);
-        }
-        if (tickLower % tickSpacing != 0 || tickUpper % tickSpacing != 0) {
-            revert InvalidTickBounds(tickLower, tickUpper, tickSpacing);
-        }
-        if (tickLower < TickMath.MIN_TICK || tickUpper > TickMath.MAX_TICK) {
-            revert InvalidTickBounds(tickLower, tickUpper, tickSpacing);
         }
     }
 

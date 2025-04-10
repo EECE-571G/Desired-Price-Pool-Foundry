@@ -6,6 +6,7 @@ import {Hooks} from "v4-core/src/libraries/Hooks.sol";
 import {LPFeeLibrary} from "v4-core/src/libraries/LPFeeLibrary.sol";
 import {ProtocolFeeLibrary} from "v4-core/src/libraries/ProtocolFeeLibrary.sol";
 import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
+import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
@@ -39,6 +40,7 @@ contract DesiredPricePool is HookReward, BaseHook, Owned {
 
     error UnauthorizedPoolInitialization();
     error UnexpectedReentrancy();
+    error InvalidTickRange(int24 lowerTick, int24 upperTick, int24 tickSpacing);
 
     /// @notice The rate of fee per tick managed by Uniswap V4 in pips.
     uint24 public constant DEFAULT_BASE_FEE_PER_TICK = 30;
@@ -186,7 +188,7 @@ contract DesiredPricePool is HookReward, BaseHook, Owned {
         if (params.liquidityDelta == 0) {
             return BaseHook.beforeAddLiquidity.selector;
         }
-        _verifyTickBounds(params.tickLower, params.tickUpper, key.tickSpacing);
+        _verifyTickRange(params.tickLower, params.tickUpper, key.tickSpacing);
         PoolId id = key.toId();
         uint256 positionId = _verifyPositionId(id, params, hookData);
         _updatePendingReward(id, key.tickSpacing, positionId, params);
@@ -202,10 +204,22 @@ contract DesiredPricePool is HookReward, BaseHook, Owned {
         if (params.liquidityDelta == 0) {
             return BaseHook.beforeRemoveLiquidity.selector;
         }
-        _verifyTickBounds(params.tickLower, params.tickUpper, key.tickSpacing);
+        _verifyTickRange(params.tickLower, params.tickUpper, key.tickSpacing);
         PoolId id = key.toId();
         uint256 positionId = _verifyPositionId(id, params, hookData);
         _updatePendingReward(id, key.tickSpacing, positionId, params);
         return BaseHook.beforeRemoveLiquidity.selector;
+    }
+
+    function _verifyTickRange(int24 tickLower, int24 tickUpper, int24 tickSpacing) internal pure {
+        if (tickLower >= tickUpper) {
+            revert InvalidTickRange(tickLower, tickUpper, tickSpacing);
+        }
+        if (tickLower % tickSpacing != 0 || tickUpper % tickSpacing != 0) {
+            revert InvalidTickRange(tickLower, tickUpper, tickSpacing);
+        }
+        if (tickLower < TickMath.MIN_TICK || tickUpper > TickMath.MAX_TICK) {
+            revert InvalidTickRange(tickLower, tickUpper, tickSpacing);
+        }
     }
 }
