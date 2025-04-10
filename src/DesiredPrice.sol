@@ -7,24 +7,82 @@ import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ERC20Pausable} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Pausable.sol";
 
+import {Poll} from "./types/Poll.sol";
 import {PriceUpdate} from "./types/PriceUpdate.sol";
+import {VoteInfo} from "./types/VoteInfo.sol";
+import {SafeCast128} from "./utils/SafeCast128.sol";
 
-abstract contract DesiredPrice {
+abstract contract DesiredPrice is ERC20Pausable {
     using PoolIdLibrary for PoolKey;
     using CustomRevert for bytes4;
+    using Poll for *;
     using SafeCast for uint256;
     using SafeCast for int256;
+    using SafeCast128 for uint128;
+    using SafeCast128 for int128;
+
+    error BalanceLocked(uint256 totalLockedBalance);
+    error InsufficientDelegation(PoolId id, address from, address to, uint256 power);
+    error ZeroDelegation();
+    error NoDelegationDuringFinalVote();
+    error UndelegationLocked(PoolId id, address from, address to, uint40 unlockTime);
+    error ZeroVotingPower(address voter);
+    error NotInVotableStage(PoolId id, Poll.Stage stage);
+    error AlreadyVoted(address voter, uint40 voteTime);
+    error ExecutionNotReady();
+
+    event PriceUpdated(PoolId indexed id, int24 oldPriceTick, int24 newPriceTick);
+    event VoteDelegated(PoolId indexed id, address indexed from, address indexed to, uint128 power);
+    event VoteUndelegated(PoolId indexed id, address indexed from, address indexed to, uint128 power);
+    event VoteCasted(PoolId indexed id, address indexed voter, int8 lowerSlot, int8 upperSlot, uint128 votingPower);
+    event PollEnded(PoolId indexed id, Poll.Result indexed result, uint16 pollId, uint40 startTime, uint128 totalVotes);
+
+    uint40 internal constant UNDELEGATE_DELAY = 1 days;
+
+    uint256 internal totalLockedBalance;
+    mapping(address => uint256) internal lockedBalances;
+
+    mapping(PoolId => mapping(address => VoteInfo)) internal voteInfos;
+    mapping(PoolId => Poll.State) internal polls;
 
     mapping(PoolId => int24 tick) public desiredPriceTicks;
     mapping(PoolId => uint24) internal priceUpdateIds;
     mapping(PoolId => mapping(uint24 => PriceUpdate)) internal priceUpdates;
 
-    IERC20 public immutable govToken;
+    function delegateVote(PoolId id, address to, uint128 power) external {
+        _updateDelegation(id, _msgSender(), to, power.toInt128());
+    }
 
-    constructor(IERC20 _govToken) {
-        govToken = _govToken;
+    function undelegateVote(PoolId id, address to, uint128 power) external {
+        _updateDelegation(id, _msgSender(), to, -power.toInt128());
+    }
+
+    function undelegateVote(PoolId id, address to) external {
+        VoteInfo storage voteInfo = voteInfos[id][_msgSender()];
+        int128 currentDelegation = int128(int256(voteInfo.delegation[to]));
+        _updateDelegation(id, _msgSender(), to, -currentDelegation);
+    }
+
+    function castVote(PoolId id, int8 lowerSlot, int8 upperSlot) external {
+        _castVote(id, _msgSender(), lowerSlot, upperSlot);
+    }
+
+    function castVote(PoolId id, int8 slot) external {
+        _castVote(id, _msgSender(), slot, slot + 1);
+    }
+
+    function execute(PoolId id) external {
+        _execute(id, true);
+    }
+
+    function votingPowerOf(PoolId id, address from) public view returns (uint256) {
+        return voteInfos[id][from].votingPower;
+    }
+
+    function getDelegation(PoolId id, address from, address to) public view returns (uint256) {
+        return voteInfos[id][from].delegation[to];
     }
 
     function _setDesiredPrice(PoolId id, int24 priceTick) internal {
@@ -37,5 +95,101 @@ abstract contract DesiredPrice {
         priceUpdates[id][nextId] = update;
         priceUpdateIds[id] = nextId + 1;
         desiredPriceTicks[id] = priceTick;
+        emit PriceUpdated(id, update.oldPriceTick, priceTick);
+    }
+
+    function _update(address from, address to, uint256 value) internal override {
+        if (from == address(this)) {
+            uint256 selfBalance = balanceOf(from);
+            uint256 locked = totalLockedBalance;
+            if (selfBalance < value + locked) {
+                revert BalanceLocked(locked);
+            }
+        }
+        super._update(from, to, value);
+    }
+
+    function _updateDelegation(PoolId id, address from, address to, int128 power) internal {
+        if (power == 0) {
+            ZeroDelegation.selector.revertWith();
+        }
+        Poll.State storage poll = polls[id];
+        if (power > 0) {
+            Poll.Stage stage = poll.getStage();
+            if (stage == Poll.Stage.FinalVote) {
+                NoDelegationDuringFinalVote.selector.revertWith();
+            }
+            //TODO: Minimum liquidity check
+        }
+        VoteInfo storage fromInfo = voteInfos[id][from];
+        VoteInfo storage toInfo = to == from ? fromInfo : voteInfos[id][to];
+        if (power < 0 && toInfo.hasVotedFor(poll.id)) {
+            uint40 unlockTime = toInfo.voteTime + UNDELEGATE_DELAY;
+            if (unlockTime > block.timestamp) {
+                revert UndelegationLocked(id, from, to, unlockTime);
+            }
+        }
+        uint256 lockedBalance = lockedBalances[from];
+        uint128 powerDelta = uint128(power < 0 ? -power : power);
+        if (power > 0) {
+            lockedBalances[from] = lockedBalance + powerDelta;
+            totalLockedBalance += powerDelta;
+            _update(from, address(this), powerDelta);
+            fromInfo.delegation[to] += powerDelta;
+            toInfo.votingPower += powerDelta;
+            emit VoteDelegated(id, from, to, powerDelta);
+        }
+        else {
+            uint256 currentDelegation = fromInfo.delegation[to];
+            if (currentDelegation < powerDelta) {
+                revert InsufficientDelegation(id, from, to, currentDelegation);
+            }
+            lockedBalances[from] = lockedBalance - powerDelta;
+            totalLockedBalance -= powerDelta;
+            _update(address(this), from, powerDelta);
+            fromInfo.delegation[to] = currentDelegation - powerDelta;
+            toInfo.votingPower -= powerDelta;
+            emit VoteUndelegated(id, from, to, powerDelta);
+        }
+    }
+
+    function _castVote(PoolId id, address voter, int8 lowerSlot, int8 upperSlot) internal {
+        VoteInfo storage info = voteInfos[id][voter];
+        uint128 votingPower = info.votingPower;
+        if (votingPower == 0) {
+            ZeroVotingPower.selector.revertWith(voter);
+        }
+        Poll.State storage poll = polls[id];
+        if (info.hasVotedFor(poll.id)) {
+            revert AlreadyVoted(voter, info.voteTime);
+        }
+        Poll.Stage stage = poll.getStage();
+        if (stage != Poll.Stage.Vote && stage != Poll.Stage.FinalVote) {
+            revert NotInVotableStage(id, stage);
+        }
+        poll.updateVote(lowerSlot, upperSlot, votingPower);
+        info.pollId = poll.id;
+        info.voteTime = block.timestamp.toUint40();
+        emit VoteCasted(id, voter, lowerSlot, upperSlot, votingPower);
+    }
+
+    function _execute(PoolId id, bool revertIfNotReady) internal returns (bool) {
+        Poll.State storage poll = polls[id];
+        if (poll.getStage() != Poll.Stage.ExecutionReady) {
+            if (revertIfNotReady) {
+                ExecutionNotReady.selector.revertWith();
+            }
+            else {
+                return false;
+            }
+        }
+        (Poll.Result result, int24 tickDelta) = poll.getResult();
+        if (tickDelta != 0) {
+            int24 currentTick = desiredPriceTicks[id];
+            _setDesiredPrice(id, currentTick + tickDelta);
+        }
+        emit PollEnded(id, result, poll.id, poll.startTime, poll.totalVotes);
+        poll.reset();
+        return true;
     }
 }

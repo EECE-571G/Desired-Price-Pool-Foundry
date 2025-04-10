@@ -20,7 +20,7 @@ import {BaseHook} from "v4-periphery/src/utils/BaseHook.sol";
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Owned} from "solmate/src/auth/Owned.sol";
 
 import {BeforeSwapInfo, BeforeSwapInfoLibrary, toBeforeSwapInfo} from "./types/BeforeSwapInfo.sol";
@@ -60,9 +60,10 @@ contract DesiredPricePool is HookReward, BaseHook, Owned {
     constructor(
         IPoolManager _poolManager,
         IPositionManager _posm,
-        address _owner,
-        IERC20 _govToken
-    ) HookReward(_posm) DesiredPrice(_govToken) BaseHook(_poolManager) Owned(_owner) {}
+        string memory _tokenName,
+        string memory _tokenSymbol,
+        address _owner
+    ) HookReward(_posm) BaseHook(_poolManager) Owned(_owner) ERC20(_tokenName, _tokenSymbol) {}
 
     function createPool(
         Currency _currency0,
