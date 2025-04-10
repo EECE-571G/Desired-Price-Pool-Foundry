@@ -11,14 +11,19 @@ library Poll {
     int8 constant VOTE_RANGE = 10;
     uint256 constant VOTE_SLOTS = 21; // VOTE_RANGE * 2 + 1
     uint256 constant CYCLE = 5;
+
     uint256 constant REGULAR_POLL_PREVOTE_END = 1 days;
     uint256 constant REGULAR_POLL_VOTE_END = 3 days;
     uint256 constant REGULAR_POLL_FINALVOTE_END = 4 days;
     uint256 constant REGULAR_POLL_EXECUTION_READY = 5 days;
+
     uint256 constant MAJOR_POLL_PREVOTE_END = 1 days;
     uint256 constant MAJOR_POLL_VOTE_END = 6 days;
     uint256 constant MAJOR_POLL_FINALVOTE_END = 8 days;
     uint256 constant MAJOR_POLL_EXECUTION_READY = 10 days;
+
+    uint8 constant FLAG_MANUAL_EXECUTION = 1 << 0;
+    uint8 constant FLAG_IN_TIME_EXECUTION = 1 << 1;
 
     enum Stage {
         PreVote,
@@ -41,6 +46,7 @@ library Poll {
         uint16 id;
         uint40 startTime;
         bool pauseRequested;
+        uint8 flags;
         uint128 totalVotes;
         int128[VOTE_SLOTS] voteDiffs;
     }
@@ -57,6 +63,18 @@ library Poll {
 
     function isMajorPoll(State storage self) internal view returns (bool) {
         return self.id % CYCLE == CYCLE - 1;
+    }
+
+    function hasFlags(State storage self, uint8 flags) internal view returns (bool) {
+        return (self.flags & flags) != 0;
+    }
+
+    function setFlags(State storage self, uint8 flags) internal {
+        self.flags |= flags;
+    }
+
+    function clearFlags(State storage self, uint8 flags) internal {
+        self.flags &= ~flags;
     }
 
     function getStage(State storage self) internal view returns (Stage stage) {

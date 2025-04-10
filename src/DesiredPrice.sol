@@ -34,6 +34,7 @@ abstract contract DesiredPrice is ERC20Pausable, Owned {
     error NotInVotableStage(PoolId id, Poll.Stage stage);
     error AlreadyVoted(address voter, uint40 voteTime);
     error ExecutionNotReady();
+    error PendingPollExecution(PoolId id);
 
     event PriceUpdated(PoolId indexed id, int24 oldPriceTick, int24 newPriceTick);
     event VoteDelegated(PoolId indexed id, address indexed from, address indexed to, uint128 power);
@@ -69,6 +70,12 @@ abstract contract DesiredPrice is ERC20Pausable, Owned {
         polls[id].pause();
     }
 
+    function updatePollFlags(PoolId id, uint8 flagsToSet, uint8 flagsToClear) external onlyOwner {
+        Poll.State storage poll = polls[id];
+        poll.setFlags(flagsToSet);
+        poll.clearFlags(flagsToClear);
+    }
+
     function delegateVote(PoolId id, address to, uint128 power) external {
         _updateDelegation(id, _msgSender(), to, power.toInt128());
     }
@@ -92,7 +99,7 @@ abstract contract DesiredPrice is ERC20Pausable, Owned {
     }
 
     function execute(PoolId id) external {
-        _execute(id, true);
+        _execute(id);
     }
 
     function votingPowerOf(PoolId id, address from) public view returns (uint256) {
@@ -194,16 +201,34 @@ abstract contract DesiredPrice is ERC20Pausable, Owned {
         emit VoteCasted(id, voter, lowerSlot, upperSlot, votingPower);
     }
 
-    function _execute(PoolId id, bool revertIfNotReady) internal whenPollNotPaused(id) returns (bool) {
+    function _checkPollExecution(PoolId id) internal {
+        Poll.State storage poll = polls[id];
+        if (poll.hasFlags(Poll.FLAG_IN_TIME_EXECUTION) && poll.getStage() == Poll.Stage.ExecutionReady) {
+            if (poll.hasFlags(Poll.FLAG_MANUAL_EXECUTION)) {
+                revert PendingPollExecution(id);
+            }
+            _executePoll(id, poll);
+        }
+    }
+
+    function _tryExecute(PoolId id) internal whenPollNotPaused(id) returns (bool) {
         Poll.State storage poll = polls[id];
         if (poll.getStage() != Poll.Stage.ExecutionReady) {
-            if (revertIfNotReady) {
-                ExecutionNotReady.selector.revertWith();
-            }
-            else {
-                return false;
-            }
+            return false;
         }
+        _executePoll(id, poll);
+        return true;
+    }
+
+    function _execute(PoolId id) internal whenPollNotPaused(id) {
+        Poll.State storage poll = polls[id];
+        if (poll.getStage() != Poll.Stage.ExecutionReady) {
+            ExecutionNotReady.selector.revertWith();
+        }
+        _executePoll(id, poll);
+    }
+
+    function _executePoll(PoolId id, Poll.State storage poll) private {
         (Poll.Result result, int24 tickDelta) = poll.getResult();
         if (tickDelta != 0) {
             int24 currentTick = desiredPriceTicks[id];
@@ -211,6 +236,5 @@ abstract contract DesiredPrice is ERC20Pausable, Owned {
         }
         emit PollEnded(id, result, poll.id, poll.startTime, poll.totalVotes);
         poll.reset();
-        return true;
     }
 }

@@ -134,6 +134,7 @@ contract DesiredPricePool is HookReward, BaseHook {
             UnexpectedReentrancy.selector.revertWith();
         }
         PoolId id = key.toId();
+        _checkPollExecution(id);
         (, int24 priceTick, uint24 protocolFee,) = poolManager.getSlot0(id);
         uint16 currentProtocolFee = swapParams.zeroForOne
             ? ProtocolFeeLibrary.getZeroForOneFee(protocolFee)
@@ -193,6 +194,7 @@ contract DesiredPricePool is HookReward, BaseHook {
         }
         _verifyTickRange(params.tickLower, params.tickUpper, key.tickSpacing);
         PoolId id = key.toId();
+        _checkPollExecution(id);
         uint256 positionId = _verifyPositionId(id, params, hookData);
         _updatePendingReward(id, key.tickSpacing, positionId, params);
         return BaseHook.beforeAddLiquidity.selector;
@@ -209,6 +211,7 @@ contract DesiredPricePool is HookReward, BaseHook {
         }
         _verifyTickRange(params.tickLower, params.tickUpper, key.tickSpacing);
         PoolId id = key.toId();
+        _checkPollExecution(id);
         uint256 positionId = _verifyPositionId(id, params, hookData);
         _updatePendingReward(id, key.tickSpacing, positionId, params);
         return BaseHook.beforeRemoveLiquidity.selector;
