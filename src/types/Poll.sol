@@ -40,6 +40,7 @@ library Poll {
     struct State {
         uint16 id;
         uint40 startTime;
+        bool pauseRequested;
         uint128 totalVotes;
         int128[VOTE_SLOTS] voteDiffs;
     }
@@ -48,6 +49,10 @@ library Poll {
         if (lowerSlot < -VOTE_RANGE || upperSlot > VOTE_RANGE + 1 || lowerSlot >= upperSlot) {
             revert InvalidVoteSlotRange(lowerSlot, upperSlot);
         }
+    }
+
+    function isPaused(State storage self) internal view returns (bool) {
+        return self.startTime == 0;
     }
 
     function isMajorPoll(State storage self) internal view returns (bool) {
@@ -127,9 +132,25 @@ library Poll {
         }
     }
 
+    function start(State storage self) internal {
+        if (self.isPaused()) {
+            self.startTime = uint40(block.timestamp);
+        }
+        if (self.pauseRequested) {
+            self.pauseRequested = false;
+        }
+    }
+
+    function pause(State storage self) internal {
+        if (!self.isPaused()) {
+            self.pauseRequested = true;
+        }
+    }
+
     function reset(State storage self) internal {
         self.id = self.id + 1;
-        self.startTime = uint40(block.timestamp);
+        self.startTime = self.pauseRequested ? 0 : uint40(block.timestamp);
+        self.pauseRequested = false;
         self.totalVotes = 0;
         delete self.voteDiffs;
     }

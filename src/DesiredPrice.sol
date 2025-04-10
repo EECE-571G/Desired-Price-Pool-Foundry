@@ -8,13 +8,14 @@ import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {ERC20Pausable} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Pausable.sol";
+import {Owned} from "solmate/src/auth/Owned.sol";
 
 import {Poll} from "./types/Poll.sol";
 import {PriceUpdate} from "./types/PriceUpdate.sol";
 import {VoteInfo} from "./types/VoteInfo.sol";
 import {SafeCast128} from "./utils/SafeCast128.sol";
 
-abstract contract DesiredPrice is ERC20Pausable {
+abstract contract DesiredPrice is ERC20Pausable, Owned {
     using PoolIdLibrary for PoolKey;
     using CustomRevert for bytes4;
     using Poll for *;
@@ -24,6 +25,7 @@ abstract contract DesiredPrice is ERC20Pausable {
     using SafeCast128 for int128;
 
     error BalanceLocked(uint256 totalLockedBalance);
+    error PollPaused(PoolId id);
     error InsufficientDelegation(PoolId id, address from, address to, uint256 power);
     error ZeroDelegation();
     error NoDelegationDuringFinalVote();
@@ -50,6 +52,22 @@ abstract contract DesiredPrice is ERC20Pausable {
     mapping(PoolId => int24 tick) public desiredPriceTicks;
     mapping(PoolId => uint24) internal priceUpdateIds;
     mapping(PoolId => mapping(uint24 => PriceUpdate)) internal priceUpdates;
+
+    modifier whenPollNotPaused(PoolId id) {
+        Poll.State storage poll = polls[id];
+        if (poll.isPaused()) {
+            revert PollPaused(id);
+        }
+        _;
+    }
+
+    function startPoll(PoolId id) external onlyOwner {
+        polls[id].start();
+    }
+
+    function pausePoll(PoolId id) external onlyOwner {
+        polls[id].pause();
+    }
 
     function delegateVote(PoolId id, address to, uint128 power) external {
         _updateDelegation(id, _msgSender(), to, power.toInt128());
@@ -115,6 +133,9 @@ abstract contract DesiredPrice is ERC20Pausable {
         }
         Poll.State storage poll = polls[id];
         if (power > 0) {
+            if (poll.isPaused()) {
+                revert PollPaused(id);
+            }
             Poll.Stage stage = poll.getStage();
             if (stage == Poll.Stage.FinalVote) {
                 NoDelegationDuringFinalVote.selector.revertWith();
@@ -153,7 +174,7 @@ abstract contract DesiredPrice is ERC20Pausable {
         }
     }
 
-    function _castVote(PoolId id, address voter, int8 lowerSlot, int8 upperSlot) internal {
+    function _castVote(PoolId id, address voter, int8 lowerSlot, int8 upperSlot) internal whenPollNotPaused(id) {
         VoteInfo storage info = voteInfos[id][voter];
         uint128 votingPower = info.votingPower;
         if (votingPower == 0) {
@@ -173,7 +194,7 @@ abstract contract DesiredPrice is ERC20Pausable {
         emit VoteCasted(id, voter, lowerSlot, upperSlot, votingPower);
     }
 
-    function _execute(PoolId id, bool revertIfNotReady) internal returns (bool) {
+    function _execute(PoolId id, bool revertIfNotReady) internal whenPollNotPaused(id) returns (bool) {
         Poll.State storage poll = polls[id];
         if (poll.getStage() != Poll.Stage.ExecutionReady) {
             if (revertIfNotReady) {

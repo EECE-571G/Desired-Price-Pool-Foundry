@@ -24,17 +24,19 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Owned} from "solmate/src/auth/Owned.sol";
 
 import {BeforeSwapInfo, BeforeSwapInfoLibrary, toBeforeSwapInfo} from "./types/BeforeSwapInfo.sol";
+import {Poll} from "./types/Poll.sol";
 import {PriceUpdate} from "./types/PriceUpdate.sol";
 import {Reward, RewardQueue} from "./types/Reward.sol";
 import {Math as Math2} from "./utils/Math.sol";
 import {DesiredPrice} from "./DesiredPrice.sol";
 import {HookReward} from "./HookReward.sol";
 
-contract DesiredPricePool is HookReward, BaseHook, Owned {
+contract DesiredPricePool is HookReward, BaseHook {
     using StateLibrary for IPoolManager;
     using PoolIdLibrary for PoolKey;
     using BalanceDeltaLibrary for BalanceDelta;
     using CustomRevert for bytes4;
+    using Poll for *;
     using SafeCast for uint256;
     using SafeCast for int256;
 
