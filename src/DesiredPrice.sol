@@ -5,17 +5,18 @@ import {CustomRevert} from "v4-core/src/libraries/CustomRevert.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
 
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {ERC20Pausable} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Pausable.sol";
 import {Owned} from "solmate/src/auth/Owned.sol";
 
+import {IDesiredPrice} from "./interfaces/IDesiredPrice.sol";
+import {IDesiredPriceOwner} from "./interfaces/IDesiredPriceOwner.sol";
 import {Poll} from "./types/Poll.sol";
 import {PriceUpdate} from "./types/PriceUpdate.sol";
 import {VoteInfo} from "./types/VoteInfo.sol";
 import {SafeCast128} from "./utils/SafeCast128.sol";
 
-abstract contract DesiredPrice is ERC20Pausable, Owned {
+abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, ERC20Pausable, Owned {
     using PoolIdLibrary for PoolKey;
     using CustomRevert for bytes4;
     using Poll for *;
@@ -23,28 +24,6 @@ abstract contract DesiredPrice is ERC20Pausable, Owned {
     using SafeCast for int256;
     using SafeCast128 for uint128;
     using SafeCast128 for int128;
-
-    error BalanceLocked(uint256 totalLockedBalance);
-    error PollPaused(PoolId id);
-    error InsufficientDelegation(PoolId id, address from, address to, uint256 power);
-    error ZeroDelegation();
-    error NoDelegationDuringFinalVote();
-    error UndelegationLocked(PoolId id, address from, address to, uint40 unlockTime);
-    error ZeroVotingPower(address voter);
-    error NotInVotableStage(PoolId id, Poll.Stage stage);
-    error AlreadyVoted(address voter, uint40 voteTime);
-    error ExecutionNotReady();
-    error PendingPollExecution(PoolId id);
-
-    event PriceUpdated(PoolId indexed id, int24 oldPriceTick, int24 newPriceTick);
-    event VoteDelegated(PoolId indexed id, address indexed from, address indexed to, uint128 power);
-    event VoteUndelegated(PoolId indexed id, address indexed from, address indexed to, uint128 power);
-    event VoteCasted(PoolId indexed id, address indexed voter, int8 lowerSlot, int8 upperSlot, uint128 votingPower);
-    event PollEnded(PoolId indexed id, Poll.Result indexed result, uint16 pollId, uint40 startTime, uint128 totalVotes);
-    event PollStarted(PoolId indexed id, uint16 indexed pollId, uint40 startTime);
-    event PollPauseRequested(PoolId indexed id, uint16 indexed pollId, uint40 requestTime);
-    event PollPauseCanceled(PoolId indexed id, uint16 indexed pollId, uint40 cancelTime);
-    event PollPaused(PoolId indexed id, uint16 indexed pollId, uint40 pauseTime);
 
     uint40 internal constant UNDELEGATE_DELAY = 1 days;
 
@@ -61,9 +40,22 @@ abstract contract DesiredPrice is ERC20Pausable, Owned {
     modifier whenPollNotPaused(PoolId id) {
         Poll.State storage poll = polls[id];
         if (poll.isPaused()) {
-            revert PollPaused(id);
+            revert PollCurrentlyPaused(id);
         }
         _;
+    }
+
+    function votingPowerOf(PoolId id, address from) external view returns (uint256) {
+        return voteInfos[id][from].votingPower;
+    }
+
+    function getDelegation(PoolId id, address from, address to) external view returns (uint256) {
+        return voteInfos[id][from].delegation[to];
+    }
+
+    function hasVoted(PoolId id, address voter) external view returns (bool) {
+        uint16 pollId = polls[id].id;
+        return voteInfos[id][voter].hasVotedFor(pollId);
     }
 
     function startPoll(PoolId id) external onlyOwner {
@@ -115,14 +107,6 @@ abstract contract DesiredPrice is ERC20Pausable, Owned {
         _execute(id);
     }
 
-    function votingPowerOf(PoolId id, address from) public view returns (uint256) {
-        return voteInfos[id][from].votingPower;
-    }
-
-    function getDelegation(PoolId id, address from, address to) public view returns (uint256) {
-        return voteInfos[id][from].delegation[to];
-    }
-
     function _setDesiredPrice(PoolId id, int24 priceTick) internal {
         PriceUpdate memory update = PriceUpdate({
             timestamp: block.timestamp.toUint40(),
@@ -154,7 +138,7 @@ abstract contract DesiredPrice is ERC20Pausable, Owned {
         Poll.State storage poll = polls[id];
         if (power > 0) {
             if (poll.isPaused()) {
-                revert PollPaused(id);
+                revert PollCurrentlyPaused(id);
             }
             Poll.Stage stage = poll.getStage();
             if (stage == Poll.Stage.FinalVote) {
@@ -211,7 +195,7 @@ abstract contract DesiredPrice is ERC20Pausable, Owned {
         poll.updateVote(lowerSlot, upperSlot, votingPower);
         info.pollId = poll.id;
         info.voteTime = block.timestamp.toUint40();
-        emit VoteCasted(id, voter, lowerSlot, upperSlot, votingPower);
+        emit VoteCasted(id, poll.id, voter, lowerSlot, upperSlot, votingPower);
     }
 
     function _checkPollExecution(PoolId id) internal {
