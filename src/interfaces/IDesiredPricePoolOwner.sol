@@ -5,8 +5,9 @@ import {Currency} from "v4-core/src/types/Currency.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 
 import {IDesiredPriceOwner} from "./IDesiredPriceOwner.sol";
+import {IGoveranceTokenOwner} from "./IGoveranceTokenOwner.sol";
 
-interface IDesiredPricePoolOwner is IDesiredPriceOwner {
+interface IDesiredPricePoolOwner is IDesiredPriceOwner, IGoveranceTokenOwner {
     error UnauthorizedPoolInitialization();
 
     function createPool(

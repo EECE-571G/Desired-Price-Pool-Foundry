@@ -7,7 +7,6 @@ import {Poll} from "../types/Poll.sol";
 import {VoteInfo} from "../types/VoteInfo.sol";
 
 interface IDesiredPrice {
-    error BalanceLocked(uint256 totalLockedBalance);
     error PollCurrentlyPaused(PoolId id);
     error InsufficientDelegation(PoolId id, address from, address to, uint256 power);
     error ZeroDelegation();

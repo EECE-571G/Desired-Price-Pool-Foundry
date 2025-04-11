@@ -6,8 +6,6 @@ import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
 
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import {ERC20Pausable} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Pausable.sol";
-import {Owned} from "solmate/src/auth/Owned.sol";
 
 import {IDesiredPrice} from "./interfaces/IDesiredPrice.sol";
 import {IDesiredPriceOwner} from "./interfaces/IDesiredPriceOwner.sol";
@@ -15,8 +13,9 @@ import {Poll} from "./types/Poll.sol";
 import {PriceUpdate} from "./types/PriceUpdate.sol";
 import {VoteInfo} from "./types/VoteInfo.sol";
 import {SafeCast128} from "./utils/SafeCast128.sol";
+import {GoveranceToken} from "./GoveranceToken.sol";
 
-abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, ERC20Pausable, Owned {
+abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, GoveranceToken {
     using PoolIdLibrary for PoolKey;
     using CustomRevert for bytes4;
     using Poll for *;
@@ -26,9 +25,6 @@ abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, ERC20Pausab
     using SafeCast128 for int128;
 
     uint40 internal constant UNDELEGATE_DELAY = 1 days;
-
-    uint256 internal totalLockedBalance;
-    mapping(address => uint256) internal lockedBalances;
 
     mapping(PoolId => mapping(address => VoteInfo)) internal voteInfos;
     mapping(PoolId => Poll.State) internal polls;
@@ -120,17 +116,6 @@ abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, ERC20Pausab
         emit PriceUpdated(id, update.oldPriceTick, priceTick);
     }
 
-    function _update(address from, address to, uint256 value) internal override {
-        if (from == address(this)) {
-            uint256 selfBalance = balanceOf(from);
-            uint256 locked = totalLockedBalance;
-            if (selfBalance < value + locked) {
-                revert BalanceLocked(locked);
-            }
-        }
-        super._update(from, to, value);
-    }
-
     function _updateDelegation(PoolId id, address from, address to, int128 power) internal {
         if (power == 0) {
             ZeroDelegation.selector.revertWith();
@@ -154,12 +139,9 @@ abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, ERC20Pausab
                 revert UndelegationLocked(id, from, to, unlockTime);
             }
         }
-        uint256 lockedBalance = lockedBalances[from];
         uint128 powerDelta = uint128(power < 0 ? -power : power);
         if (power > 0) {
-            lockedBalances[from] = lockedBalance + powerDelta;
-            totalLockedBalance += powerDelta;
-            _update(from, address(this), powerDelta);
+            lock(from, powerDelta);
             fromInfo.delegation[to] += powerDelta;
             toInfo.votingPower += powerDelta;
             emit VoteDelegated(id, from, to, powerDelta);
@@ -169,9 +151,7 @@ abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, ERC20Pausab
             if (currentDelegation < powerDelta) {
                 revert InsufficientDelegation(id, from, to, currentDelegation);
             }
-            lockedBalances[from] = lockedBalance - powerDelta;
-            totalLockedBalance -= powerDelta;
-            _update(address(this), from, powerDelta);
+            unlock(from, powerDelta);
             fromInfo.delegation[to] = currentDelegation - powerDelta;
             toInfo.votingPower -= powerDelta;
             emit VoteUndelegated(id, from, to, powerDelta);
