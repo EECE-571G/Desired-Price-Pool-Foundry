@@ -16,21 +16,18 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 
+import {IHookReward} from "./interfaces/IHookReward.sol";
 import {Reward, RewardQueue} from "./types/Reward.sol";
 import {Math as Math2} from "./utils/Math.sol";
 import {DesiredPrice} from "./DesiredPrice.sol";
 
-abstract contract HookReward is DesiredPrice, ReentrancyGuard {
+abstract contract HookReward is DesiredPrice, ReentrancyGuard, IHookReward {
     using PoolIdLibrary for PoolKey;
     using BalanceDeltaLibrary for BalanceDelta;
     using PositionInfoLibrary for PositionInfo;
     using CustomRevert for bytes4;
     using SafeCast for uint256;
     using SafeCast for int256;
-
-    error InvalidPositionId(uint256 positionId);
-    error InvalidAddress(address addr);
-    error NotPositionOwner(address owner, address sender);
 
     /// @notice The maximum tick spacing for the pool.
     int24 public constant MAX_TICK_SPACING = 200;
