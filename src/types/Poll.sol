@@ -42,6 +42,14 @@ library Poll {
         MoveUp
     }
 
+    enum StartPauseResult {
+        Unchanged,
+        Started,
+        PauseRequested,
+        PauseCanceled,
+        Paused
+    }
+
     struct State {
         uint16 id;
         uint40 startTime;
@@ -150,24 +158,34 @@ library Poll {
         }
     }
 
-    function start(State storage self) internal {
-        if (self.isPaused()) {
-            self.startTime = uint40(block.timestamp);
-        }
+    function start(State storage self) internal returns (StartPauseResult result) {
         if (self.pauseRequested) {
             self.pauseRequested = false;
+            result = StartPauseResult.PauseCanceled;
+        }
+        if (self.isPaused()) {
+            self.startTime = uint40(block.timestamp);
+            result = StartPauseResult.Started;
         }
     }
 
-    function pause(State storage self) internal {
+    function pause(State storage self) internal returns (StartPauseResult result) {
         if (!self.isPaused()) {
             self.pauseRequested = true;
+            result = StartPauseResult.PauseRequested;
         }
     }
 
-    function reset(State storage self) internal {
+    function reset(State storage self) internal returns (StartPauseResult result) {
         self.id = self.id + 1;
-        self.startTime = self.pauseRequested ? 0 : uint40(block.timestamp);
+        if (self.pauseRequested) {
+            self.startTime = 0;
+            result = StartPauseResult.Paused;
+        }
+        else {
+            self.startTime = uint40(block.timestamp);
+            result = StartPauseResult.Unchanged;
+        }
         self.pauseRequested = false;
         self.totalVotes = 0;
         delete self.voteDiffs;

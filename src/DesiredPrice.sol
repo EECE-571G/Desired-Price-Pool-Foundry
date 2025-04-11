@@ -41,6 +41,10 @@ abstract contract DesiredPrice is ERC20Pausable, Owned {
     event VoteUndelegated(PoolId indexed id, address indexed from, address indexed to, uint128 power);
     event VoteCasted(PoolId indexed id, address indexed voter, int8 lowerSlot, int8 upperSlot, uint128 votingPower);
     event PollEnded(PoolId indexed id, Poll.Result indexed result, uint16 pollId, uint40 startTime, uint128 totalVotes);
+    event PollStarted(PoolId indexed id, uint16 indexed pollId, uint40 startTime);
+    event PollPauseRequested(PoolId indexed id, uint16 indexed pollId, uint40 requestTime);
+    event PollPauseCanceled(PoolId indexed id, uint16 indexed pollId, uint40 cancelTime);
+    event PollPaused(PoolId indexed id, uint16 indexed pollId, uint40 pauseTime);
 
     uint40 internal constant UNDELEGATE_DELAY = 1 days;
 
@@ -63,11 +67,20 @@ abstract contract DesiredPrice is ERC20Pausable, Owned {
     }
 
     function startPoll(PoolId id) external onlyOwner {
-        polls[id].start();
+        Poll.StartPauseResult result = polls[id].start();
+        if (result == Poll.StartPauseResult.Started) {
+            emit PollStarted(id, polls[id].id, block.timestamp.toUint40());
+        }
+        else if (result == Poll.StartPauseResult.PauseCanceled) {
+            emit PollPauseCanceled(id, polls[id].id, block.timestamp.toUint40());
+        }
     }
 
     function pausePoll(PoolId id) external onlyOwner {
-        polls[id].pause();
+        Poll.StartPauseResult result = polls[id].pause();
+        if (result == Poll.StartPauseResult.PauseRequested) {
+            emit PollPauseRequested(id, polls[id].id, block.timestamp.toUint40());
+        }
     }
 
     function updatePollFlags(PoolId id, uint8 flagsToSet, uint8 flagsToClear) external onlyOwner {
@@ -234,7 +247,10 @@ abstract contract DesiredPrice is ERC20Pausable, Owned {
             int24 currentTick = desiredPriceTicks[id];
             _setDesiredPrice(id, currentTick + tickDelta);
         }
-        emit PollEnded(id, result, poll.id, poll.startTime, poll.totalVotes);
-        poll.reset();
+        emit PollEnded(id, poll.id, result, poll.startTime, poll.totalVotes);
+        Poll.StartPauseResult res = poll.reset();
+        if (res == Poll.StartPauseResult.Paused) {
+            emit PollPaused(id, poll.id, block.timestamp.toUint40());
+        }
     }
 }
