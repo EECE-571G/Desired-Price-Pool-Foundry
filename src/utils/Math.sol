@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: MIT
-
 pragma solidity ^0.8.20;
 
 /**
  * @dev Supplementary math functions.
  */
 library Math {
+    function abs8(int8 x) internal pure returns (int8) {
+        return x < 0 ? -x : x;
+    }
+
     function abs24(int24 x) internal pure returns (int24) {
         return x < 0 ? -x : x;
     }

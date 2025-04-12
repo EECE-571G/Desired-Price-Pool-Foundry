@@ -25,6 +25,9 @@ import {IERC20} from "forge-std/interfaces/IERC20.sol";
 import {IPositionDescriptor} from "v4-periphery/src/interfaces/IPositionDescriptor.sol";
 import {IWETH9} from "v4-periphery/src/interfaces/external/IWETH9.sol";
 
+import "forge-std/console.sol";
+
+
 /// @notice Forge script for deploying v4 & hooks to **anvil**
 contract CounterScript is Script, DeployPermit2 {
     using EasyPosm for IPositionManager;
@@ -57,12 +60,19 @@ contract CounterScript is Script, DeployPermit2 {
         vm.broadcast();
         Counter counter = new Counter{salt: salt}(manager);
         require(address(counter) == hookAddress, "CounterScript: hook address mismatch");
+        
+        // Verify the address deployed
+        console.log("Counter deployed at:", address(counter));
 
         // Additional helpers for interacting with the pool
         vm.startBroadcast();
         posm = deployPosm(manager);
         (lpRouter, swapRouter,) = deployRouters(manager);
         vm.stopBroadcast();
+
+        console.log("PoolManager deployed at:", address(manager));
+        console.log("PositionManager deployed at:", address(posm));
+        console.log("PoolSwapTest (SwapRouter) deployed at:", address(swapRouter)); // <-- NEED THIS
 
         // test the lifecycle (create pool, add liquidity, swap)
         vm.startBroadcast();
@@ -115,6 +125,8 @@ contract CounterScript is Script, DeployPermit2 {
 
     function testLifecycle(address hook) internal {
         (MockERC20 token0, MockERC20 token1) = deployTokens();
+        console.log("Token0 deployed at:", address(token0)); // <-- NEED THIS
+        console.log("Token1 deployed at:", address(token1)); // <-- NEED THIS
         token0.mint(msg.sender, 100_000 ether);
         token1.mint(msg.sender, 100_000 ether);
 

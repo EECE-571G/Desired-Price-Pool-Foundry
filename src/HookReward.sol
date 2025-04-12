@@ -2,7 +2,6 @@
 pragma solidity ^0.8.24;
 
 import {CustomRevert} from "v4-core/src/libraries/CustomRevert.sol";
-import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
@@ -17,22 +16,18 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 
+import {IHookReward} from "./interfaces/IHookReward.sol";
 import {Reward, RewardQueue} from "./types/Reward.sol";
 import {Math as Math2} from "./utils/Math.sol";
 import {DesiredPrice} from "./DesiredPrice.sol";
 
-abstract contract HookReward is DesiredPrice, ReentrancyGuard {
+abstract contract HookReward is DesiredPrice, ReentrancyGuard, IHookReward {
     using PoolIdLibrary for PoolKey;
     using BalanceDeltaLibrary for BalanceDelta;
     using PositionInfoLibrary for PositionInfo;
     using CustomRevert for bytes4;
     using SafeCast for uint256;
     using SafeCast for int256;
-
-    error InvalidPositionId(uint256 positionId);
-    error InvalidTickBounds(int24 tickLower, int24 tickUpper, int24 tickSpacing);
-    error InvalidAddress(address addr);
-    error NotPositionOwner(address owner, address sender);
 
     /// @notice The maximum tick spacing for the pool.
     int24 public constant MAX_TICK_SPACING = 200;
@@ -104,6 +99,30 @@ abstract contract HookReward is DesiredPrice, ReentrancyGuard {
         }
     }
 
+    function _calculateRewardRange(int24 _tickSpacing) internal pure returns (int24 range) {
+        uint256 tickSpacing = uint24(_tickSpacing);
+        return ((Math.log2(tickSpacing) + 2) * uint24(MAX_TICK_SPACING) >> 2).toInt256().toInt24();
+    }
+
+    function _calculateWeight(
+        int24 tickLower,
+        int24 tickUpper,
+        int24 tickSpacing,
+        int24 desiredPrice,
+        int24 rewardRange,
+        int256 liquidityDelta
+    ) internal pure returns (uint256 weight) {
+        int256 left = Math2.max(tickLower, desiredPrice - rewardRange);
+        int256 right = Math2.min(tickUpper, desiredPrice + rewardRange + 1);
+        left = left / tickSpacing * tickSpacing;
+        uint256 factor = Math.sqrt(int256(tickSpacing).toUint256() << 232) << 2;
+        uint256 sum = 0;
+        for (int256 i = left; i < right; i += tickSpacing) {
+            sum += (factor << 16) / (factor + (int256(Math2.abs(i - desiredPrice)).toUint256() << 116));
+        }
+        return (sum * Math2.abs(liquidityDelta).toUint256()) >> 16;
+    }
+
     function _calculateReward(
         PoolId id,
         Currency currency0,
@@ -129,9 +148,9 @@ abstract contract HookReward is DesiredPrice, ReentrancyGuard {
         uint256 positionId,
         IPoolManager.ModifyLiquidityParams calldata params
     ) internal {
-        int256 desiredPrice = desiredPriceTicks[id];
-        int256 rewardRange = _checkRewardRange(desiredPrice, params.tickLower, params.tickUpper, tickSpacing);
-        if (rewardRange == 0) {
+        int24 desiredPrice = desiredPriceTicks[id];
+        int24 range = _calculateRewardRange(tickSpacing);
+        if (params.tickLower < desiredPrice - range || params.tickUpper >= desiredPrice + range) {
             return;
         }
 
@@ -142,7 +161,14 @@ abstract contract HookReward is DesiredPrice, ReentrancyGuard {
         }
 
         uint40 timestamp = block.timestamp.toUint40();
-        uint256 weight = _calculateWeight(params, desiredPrice, tickSpacing, rewardRange);
+        uint256 weight = _calculateWeight(
+            params.tickLower,
+            params.tickUpper,
+            tickSpacing,
+            desiredPrice,
+            range,
+            params.liquidityDelta
+        );
 
         if (isAddLiquidity) {
             bool done = false;
@@ -203,24 +229,6 @@ abstract contract HookReward is DesiredPrice, ReentrancyGuard {
         }
     }
 
-    function _verifyTickBounds(int24 tickLower, int24 tickUpper, int24 tickSpacing) internal pure {
-        if (tickLower >= tickUpper) {
-            revert InvalidTickBounds(tickLower, tickUpper, tickSpacing);
-        }
-        if (tickLower % tickSpacing != 0 || tickUpper % tickSpacing != 0) {
-            revert InvalidTickBounds(tickLower, tickUpper, tickSpacing);
-        }
-        if (tickLower < TickMath.MIN_TICK || tickUpper > TickMath.MAX_TICK) {
-            revert InvalidTickBounds(tickLower, tickUpper, tickSpacing);
-        }
-    }
-
-    function _checkRewardRange(int256 desiredPrice, int24 tickLower, int24 tickUpper, int24 _tickSpacing) internal pure returns (int256 rewardRange) {
-        uint256 tickSpacing = uint24(_tickSpacing);
-        int256 range = ((Math.log2(tickSpacing) + 2) * uint24(MAX_TICK_SPACING) >> 2).toInt256();
-        return tickLower < desiredPrice - range || tickUpper >= desiredPrice + range ? int256(0) : range;
-    }
-
     function _verifyPositionId(
         PoolId id,
         IPoolManager.ModifyLiquidityParams calldata params,
@@ -235,22 +243,6 @@ abstract contract HookReward is DesiredPrice, ReentrancyGuard {
         if (position.tickLower() != params.tickLower || position.tickUpper() != params.tickUpper) {
             revert InvalidPositionId(positionId);
         }
-    }
-
-    function _calculateWeight(
-        IPoolManager.ModifyLiquidityParams calldata params,
-        int256 desiredPrice,
-        int24 tickSpacing,
-        int256 rewardRange
-    ) internal pure returns (uint256 weight) {
-        int256 left = Math2.max(params.tickLower, desiredPrice - rewardRange);
-        int256 right = Math2.min(params.tickUpper, desiredPrice + rewardRange + tickSpacing);
-        uint256 factor = Math.sqrt(int256(tickSpacing).toUint256() << 232) << 2;
-        uint256 sum = 0;
-        for (int256 i = left; i < right; i += tickSpacing) {
-            sum += (factor << 16) / (factor + (int256(Math2.abs(i - desiredPrice)).toUint256() << 116));
-        }
-        return (sum * Math2.abs(params.liquidityDelta).toUint256()) >> 16;
     }
 
     function _updateCollectableReward(uint256 positionId, uint40 timestamp) internal returns (bool empty, uint256 collectable) {

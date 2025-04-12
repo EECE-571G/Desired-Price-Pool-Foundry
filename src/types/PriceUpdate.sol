@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {PoolId} from "v4-core/src/types/PoolId.sol";
-
 struct PriceUpdate {
     /// @notice The timestamp when the price update happened
     uint40 timestamp;
