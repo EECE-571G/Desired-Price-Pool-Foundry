@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import {PoolId} from "v4-core/src/types/PoolId.sol";
 
-import {Poll} from "../types/Poll.sol";
+import {Poll} from "../libraries/Poll.sol";
 import {VoteInfo} from "../types/VoteInfo.sol";
 import {IGoveranceToken} from "./IGoveranceToken.sol";
 

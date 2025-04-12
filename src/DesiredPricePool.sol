@@ -24,7 +24,6 @@ import {Owned} from "solmate/src/auth/Owned.sol";
 
 import {IDesiredPricePoolOwner} from "./interfaces/IDesiredPricePoolOwner.sol";
 import {BeforeSwapInfo, BeforeSwapInfoLibrary, toBeforeSwapInfo} from "./types/BeforeSwapInfo.sol";
-import {Poll} from "./types/Poll.sol";
 import {PriceUpdate} from "./types/PriceUpdate.sol";
 import {Reward, RewardQueue} from "./types/Reward.sol";
 import {Math as Math2} from "./utils/Math.sol";
@@ -36,7 +35,6 @@ contract DesiredPricePool is IDesiredPricePoolOwner, HookReward, BaseHook {
     using PoolIdLibrary for PoolKey;
     using BalanceDeltaLibrary for BalanceDelta;
     using CustomRevert for bytes4;
-    using Poll for *;
     using SafeCast for uint256;
     using SafeCast for int256;
 

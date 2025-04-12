@@ -12,7 +12,7 @@ import {Owned} from "solmate/src/auth/Owned.sol";
 import {IDesiredPrice} from "./interfaces/IDesiredPrice.sol";
 import {IDesiredPriceOwner} from "./interfaces/IDesiredPriceOwner.sol";
 import {IGoveranceToken} from "./interfaces/IGoveranceToken.sol";
-import {Poll} from "./types/Poll.sol";
+import {Poll} from "./libraries/Poll.sol";
 import {PriceUpdate} from "./types/PriceUpdate.sol";
 import {VoteInfo} from "./types/VoteInfo.sol";
 import {SafeCast128} from "./utils/SafeCast128.sol";
