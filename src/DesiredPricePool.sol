@@ -62,7 +62,7 @@ contract DesiredPricePool is IDesiredPricePoolOwner, HookReward, BaseHook {
         IPoolManager _poolManager,
         IPositionManager _posm,
         address _owner
-    ) HookReward(_posm) BaseHook(_poolManager) Owned(_owner) {}
+    ) HookReward(_posm) BaseHook(_poolManager) DesiredPrice(_owner) {}
 
     function createPool(
         Currency _currency0,

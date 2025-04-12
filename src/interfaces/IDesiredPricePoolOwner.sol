@@ -7,7 +7,7 @@ import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {IDesiredPriceOwner} from "./IDesiredPriceOwner.sol";
 import {IGoveranceTokenOwner} from "./IGoveranceTokenOwner.sol";
 
-interface IDesiredPricePoolOwner is IDesiredPriceOwner, IGoveranceTokenOwner {
+interface IDesiredPricePoolOwner is IDesiredPriceOwner {
     error UnauthorizedPoolInitialization();
 
     function createPool(

@@ -5,17 +5,20 @@ import {CustomRevert} from "v4-core/src/libraries/CustomRevert.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
 
+import {Context} from "@openzeppelin/contracts/utils/Context.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {Owned} from "solmate/src/auth/Owned.sol";
 
 import {IDesiredPrice} from "./interfaces/IDesiredPrice.sol";
 import {IDesiredPriceOwner} from "./interfaces/IDesiredPriceOwner.sol";
+import {IGoveranceToken} from "./interfaces/IGoveranceToken.sol";
 import {Poll} from "./types/Poll.sol";
 import {PriceUpdate} from "./types/PriceUpdate.sol";
 import {VoteInfo} from "./types/VoteInfo.sol";
 import {SafeCast128} from "./utils/SafeCast128.sol";
 import {GoveranceToken} from "./GoveranceToken.sol";
 
-abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, GoveranceToken {
+abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, Context, Owned {
     using PoolIdLibrary for PoolKey;
     using CustomRevert for bytes4;
     using Poll for *;
@@ -26,6 +29,8 @@ abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, GoveranceTo
 
     uint40 internal constant UNDELEGATE_DELAY = 1 days;
 
+    GoveranceToken internal immutable govToken;
+
     mapping(PoolId => mapping(address => VoteInfo)) internal voteInfos;
     mapping(PoolId => Poll.State) internal polls;
 
@@ -33,12 +38,20 @@ abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, GoveranceTo
     mapping(PoolId => uint24) internal priceUpdateIds;
     mapping(PoolId => mapping(uint24 => PriceUpdate)) internal priceUpdates;
 
+    constructor(address _owner) Owned(_owner) {
+        govToken = new GoveranceToken(_owner);
+    }
+
     modifier whenPollNotPaused(PoolId id) {
         Poll.State storage poll = polls[id];
         if (poll.isPaused()) {
             revert PollCurrentlyPaused(id);
         }
         _;
+    }
+
+    function goveranceToken() external view returns (IGoveranceToken) {
+        return govToken;
     }
 
     function votingPowerOf(PoolId id, address from) external view returns (uint256) {
@@ -141,7 +154,7 @@ abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, GoveranceTo
         }
         uint128 powerDelta = uint128(power < 0 ? -power : power);
         if (power > 0) {
-            lock(from, powerDelta);
+            govToken.lock(from, powerDelta);
             fromInfo.delegation[to] += powerDelta;
             toInfo.votingPower += powerDelta;
             emit VoteDelegated(id, from, to, powerDelta);
@@ -151,7 +164,7 @@ abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, GoveranceTo
             if (currentDelegation < powerDelta) {
                 revert InsufficientDelegation(id, from, to, currentDelegation);
             }
-            unlock(from, powerDelta);
+            govToken.unlock(from, powerDelta);
             fromInfo.delegation[to] = currentDelegation - powerDelta;
             toInfo.votingPower -= powerDelta;
             emit VoteUndelegated(id, from, to, powerDelta);
