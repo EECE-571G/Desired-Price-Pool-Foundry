@@ -186,7 +186,7 @@ contract DesiredPricePool is IDesiredPricePoolOwner, HookReward, BaseHook {
         IPoolManager.ModifyLiquidityParams calldata params,
         bytes calldata hookData
     ) internal override returns (bytes4) {
-        if (params.liquidityDelta == 0) {
+        if (params.liquidityDelta == 0 || hookData.length == 0) {
             return BaseHook.beforeAddLiquidity.selector;
         }
         _verifyTickRange(params.tickLower, params.tickUpper, key.tickSpacing);
