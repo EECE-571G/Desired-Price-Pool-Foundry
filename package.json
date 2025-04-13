@@ -1,0 +1,19 @@
+{
+    "name": "desired-price-pool",
+    "version": "1.0.0",
+    "description": "",
+    "exports": {
+        "./*": "./out/*"
+    },
+    "scripts": {
+        "clean": "forge clean",
+        "build": "forge build",
+        "build:size": "forge build --size",
+        "test": "forge test",
+        "test:v": "forge test -vvv",
+        "script:anvil": "forge script script/Anvil.s.sol --rpc-url http://localhost:8545 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 --broadcast"
+    },
+    "keywords": [],
+    "author": "jadrvel",
+    "license": "MIT"
+}
