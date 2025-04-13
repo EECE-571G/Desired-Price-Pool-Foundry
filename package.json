@@ -1,0 +1,8 @@
+{
+  "name": "@my-dapp/contracts",
+  "version": "0.1.0",
+  "files": ["out/**/*.json"],
+  "scripts": {
+    "build": "forge build"
+  }
+}

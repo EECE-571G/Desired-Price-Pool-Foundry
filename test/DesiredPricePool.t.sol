@@ -15,6 +15,7 @@ import {PoolSwapTest} from "v4-core/src/test/PoolSwapTest.sol";
 import {LiquidityAmounts} from "v4-core/test/utils/LiquidityAmounts.sol";
 
 import {IPositionManager} from "v4-periphery/src/interfaces/IPositionManager.sol";
+
 import {PositionInfo, PositionInfoLibrary} from "v4-periphery/src/libraries/PositionInfoLibrary.sol";
 
 import {DesiredPricePool} from "../src/DesiredPricePool.sol";
@@ -26,6 +27,7 @@ contract DesiredPricePoolTest is Test, Fixtures {
     using CurrencyLibrary for Currency;
     using PoolIdLibrary for PoolKey;
     using PositionInfoLibrary for PositionInfo;
+
     using StateLibrary for IPoolManager;
     using EasyPosm for IPositionManager;
 
@@ -39,7 +41,9 @@ contract DesiredPricePoolTest is Test, Fixtures {
         deployAndApprovePosm(manager);
 
         // Deploy the hook to an address with the correct flags
+
         address flags = address(DPPLibrary.PERMISSION_FLAGS ^ (0x4444 << 144)); // Namespace the hook to avoid collisions
+
         bytes memory constructorArgs = abi.encode(manager, posm, address(this));
         deployCodeTo("DesiredPricePool.sol:DesiredPricePool", constructorArgs, flags);
         dpp = DesiredPricePool(flags);
@@ -68,6 +72,7 @@ contract DesiredPricePoolTest is Test, Fixtures {
             ZERO_BYTES
         );
     }
+
 
     function testMintPosition() public {
         // Provide full-range liquidity to the pool

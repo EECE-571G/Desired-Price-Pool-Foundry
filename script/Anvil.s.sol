@@ -21,6 +21,8 @@ import {PositionManager} from "v4-periphery/src/PositionManager.sol";
 import {IPositionDescriptor} from "v4-periphery/src/interfaces/IPositionDescriptor.sol";
 import {IWETH9} from "v4-periphery/src/interfaces/external/IWETH9.sol";
 
+
+
 import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 
@@ -55,8 +57,11 @@ contract DesiredPricePoolScript is Script, DeployPermit2 {
         // Deploy the hook using CREATE2 //
         // ----------------------------- //
         vm.broadcast();
+
         DesiredPricePool dpp = new DesiredPricePool{salt: salt}(manager, posm, msg.sender);
         require(address(dpp) == hookAddress, "DesiredPricePoolScript: hook address mismatch");
+        console.log("dpp deployed at:", address(dpp));
+
 
         // Additional helpers for interacting with the pool
         vm.startBroadcast();
@@ -71,6 +76,7 @@ contract DesiredPricePoolScript is Script, DeployPermit2 {
         console.log("PoolSwapTest deployed at:", address(swapRouter));
 
         // Test the lifecycle (create pool, add liquidity, swap)
+
         vm.startBroadcast();
         testLifecycle(dpp);
         vm.stopBroadcast();
@@ -126,6 +132,9 @@ contract DesiredPricePoolScript is Script, DeployPermit2 {
 
     function testLifecycle(DesiredPricePool dpp) internal {
         (MockERC20 token0, MockERC20 token1) = deployTokens();
+
+        console.log("Token0 deployed at:", address(token0)); // <-- NEED THIS
+        console.log("Token1 deployed at:", address(token1)); // <-- NEED THIS
 
         token0.mint(msg.sender, 100_000 ether);
         token1.mint(msg.sender, 100_000 ether);
