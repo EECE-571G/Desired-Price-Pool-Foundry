@@ -22,7 +22,7 @@ import {DPPLibrary} from "../src/libraries/DPPLibrary.sol";
 import {EasyPosm} from "./utils/EasyPosm.sol";
 import {Fixtures} from "./utils/Fixtures.sol";
 
-contract DesiredPricePoolTest is Test, Fixtures {
+abstract contract DPPTestBase is Test, Fixtures {
     using CurrencyLibrary for Currency;
     using PoolIdLibrary for PoolKey;
     using PositionInfoLibrary for PositionInfo;
@@ -67,15 +67,5 @@ contract DesiredPricePoolTest is Test, Fixtures {
             block.timestamp,
             ZERO_BYTES
         );
-    }
-
-    function testMintPosition() public {
-        // Provide full-range liquidity to the pool
-        int24 tickLower = TickMath.minUsableTick(key.tickSpacing);
-        int24 tickUpper = TickMath.maxUsableTick(key.tickSpacing);
-        uint128 liquidityAmount = 100e18;
-        uint256 tokenId = mintPosition(tickLower, tickUpper, liquidityAmount);
-        (uint128 liquidity, , ) = manager.getPositionInfo(poolId, address(posm), tickLower, tickUpper, bytes32(tokenId));
-        assertEq(liquidity, liquidityAmount);
     }
 }
