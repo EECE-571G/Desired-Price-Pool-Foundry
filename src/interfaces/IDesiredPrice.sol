@@ -3,8 +3,9 @@ pragma solidity ^0.8.24;
 
 import {PoolId} from "v4-core/src/types/PoolId.sol";
 
-import {Poll} from "../types/Poll.sol";
+import {Poll} from "../libraries/Poll.sol";
 import {VoteInfo} from "../types/VoteInfo.sol";
+import {IGoveranceToken} from "./IGoveranceToken.sol";
 
 interface IDesiredPrice {
     error PollCurrentlyPaused(PoolId id);
@@ -23,6 +24,8 @@ interface IDesiredPrice {
     event VoteUndelegated(PoolId indexed id, address indexed from, address indexed to, uint128 power);
     event VoteCasted(PoolId indexed id, uint16 indexed pollId, address indexed voter, int8 lowerSlot, int8 upperSlot, uint128 votingPower);
     event PollEnded(PoolId indexed id, uint16 indexed pollId, Poll.Result result, uint40 startTime, uint128 totalVotes);
+
+    function goveranceToken() external view returns (IGoveranceToken);
 
     function votingPowerOf(PoolId id, address from) external view returns (uint256);
 

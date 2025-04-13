@@ -29,9 +29,13 @@ abstract contract HookReward is DesiredPrice, ReentrancyGuard, IHookReward {
     using SafeCast for uint256;
     using SafeCast for int256;
 
+    error InvalidHookData(bytes hookData);
+
     /// @notice The maximum tick spacing for the pool.
     int24 public constant MAX_TICK_SPACING = 200;
     uint24 public constant REWARD_LOCK_PERIOD = 1 days;
+    bytes4 public constant HOOK_DATA_PREFIX = bytes4("DPP:");
+    uint256 public constant HOOK_DATA_LENGTH = 36; // 4 + 32 bytes
 
     mapping(PoolId => BalanceDelta) internal feesCollected;
     mapping(PoolId => uint256) internal totalWeights;
@@ -234,7 +238,14 @@ abstract contract HookReward is DesiredPrice, ReentrancyGuard, IHookReward {
         IPoolManager.ModifyLiquidityParams calldata params,
         bytes calldata hookData
     ) internal view returns (uint256 positionId) {
-        positionId = abi.decode(hookData, (uint256));
+        if (hookData.length != 36) {
+            revert InvalidHookData(hookData);
+        }
+        bytes4 prefix;
+        (prefix, positionId) = abi.decode(hookData, (bytes4, uint256));
+        if (prefix != HOOK_DATA_PREFIX) {
+            revert InvalidHookData(hookData);
+        }
         PositionInfo position = posm.positionInfo(positionId);
         bytes25 positionPoolId = position.poolId();
         if (positionPoolId != bytes25(PoolId.unwrap(id))) {

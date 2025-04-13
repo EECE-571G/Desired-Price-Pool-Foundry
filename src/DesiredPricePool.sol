@@ -24,7 +24,6 @@ import {Owned} from "solmate/src/auth/Owned.sol";
 
 import {IDesiredPricePoolOwner} from "./interfaces/IDesiredPricePoolOwner.sol";
 import {BeforeSwapInfo, BeforeSwapInfoLibrary, toBeforeSwapInfo} from "./types/BeforeSwapInfo.sol";
-import {Poll} from "./types/Poll.sol";
 import {PriceUpdate} from "./types/PriceUpdate.sol";
 import {Reward, RewardQueue} from "./types/Reward.sol";
 import {Math as Math2} from "./utils/Math.sol";
@@ -36,7 +35,6 @@ contract DesiredPricePool is IDesiredPricePoolOwner, HookReward, BaseHook {
     using PoolIdLibrary for PoolKey;
     using BalanceDeltaLibrary for BalanceDelta;
     using CustomRevert for bytes4;
-    using Poll for *;
     using SafeCast for uint256;
     using SafeCast for int256;
 
@@ -62,7 +60,7 @@ contract DesiredPricePool is IDesiredPricePoolOwner, HookReward, BaseHook {
         IPoolManager _poolManager,
         IPositionManager _posm,
         address _owner
-    ) HookReward(_posm) BaseHook(_poolManager) Owned(_owner) {}
+    ) HookReward(_posm) BaseHook(_poolManager) DesiredPrice(_owner) {}
 
     function createPool(
         Currency _currency0,
@@ -186,7 +184,7 @@ contract DesiredPricePool is IDesiredPricePoolOwner, HookReward, BaseHook {
         IPoolManager.ModifyLiquidityParams calldata params,
         bytes calldata hookData
     ) internal override returns (bytes4) {
-        if (params.liquidityDelta == 0) {
+        if (params.liquidityDelta == 0 || hookData.length == 0) {
             return BaseHook.beforeAddLiquidity.selector;
         }
         _verifyTickRange(params.tickLower, params.tickUpper, key.tickSpacing);

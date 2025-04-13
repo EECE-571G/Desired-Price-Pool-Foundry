@@ -2,6 +2,8 @@
 pragma solidity ^0.8.19;
 
 import "forge-std/Script.sol";
+import {IERC20} from "forge-std/interfaces/IERC20.sol";
+
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "v4-core/src/libraries/Hooks.sol";
 import {PoolManager} from "v4-core/src/PoolManager.sol";
@@ -10,26 +12,28 @@ import {PoolModifyLiquidityTest} from "v4-core/src/test/PoolModifyLiquidityTest.
 import {PoolSwapTest} from "v4-core/src/test/PoolSwapTest.sol";
 import {PoolDonateTest} from "v4-core/src/test/PoolDonateTest.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
-import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
-import {Constants} from "v4-core/src/../test/utils/Constants.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {CurrencyLibrary, Currency} from "v4-core/src/types/Currency.sol";
-import {Counter} from "../src/Counter.sol";
+import {Constants} from "v4-core/test/utils/Constants.sol";
 import {HookMiner} from "v4-periphery/src/utils/HookMiner.sol";
 import {IPositionManager} from "v4-periphery/src/interfaces/IPositionManager.sol";
 import {PositionManager} from "v4-periphery/src/PositionManager.sol";
-import {EasyPosm} from "../test/utils/EasyPosm.sol";
-import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
-import {DeployPermit2} from "../test/utils/forks/DeployPermit2.sol";
-import {IERC20} from "forge-std/interfaces/IERC20.sol";
 import {IPositionDescriptor} from "v4-periphery/src/interfaces/IPositionDescriptor.sol";
 import {IWETH9} from "v4-periphery/src/interfaces/external/IWETH9.sol";
 
-import "forge-std/console.sol";
+
+
+import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
+import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
+
+import {DPPLibrary} from "../src/libraries/DPPLibrary.sol";
+import {DesiredPricePool} from "../src/DesiredPricePool.sol";
+import {DeployPermit2} from "../test/utils/forks/DeployPermit2.sol";
+import {EasyPosm} from "../test/utils/EasyPosm.sol";
 
 
 /// @notice Forge script for deploying v4 & hooks to **anvil**
-contract CounterScript is Script, DeployPermit2 {
+contract DesiredPricePoolScript is Script, DeployPermit2 {
     using EasyPosm for IPositionManager;
 
     address constant CREATE2_DEPLOYER = address(0x4e59b44847b379578588920cA78FbF26c0B4956C);
@@ -44,25 +48,20 @@ contract CounterScript is Script, DeployPermit2 {
         vm.broadcast();
         manager = deployPoolManager();
 
-        // hook contracts must have specific flags encoded in the address
-        uint160 permissions = uint160(
-            Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
-                | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
-        );
-
+        bytes memory constructorArgs = abi.encode(manager, posm, msg.sender);
         // Mine a salt that will produce a hook address with the correct permissions
         (address hookAddress, bytes32 salt) =
-            HookMiner.find(CREATE2_DEPLOYER, permissions, type(Counter).creationCode, abi.encode(address(manager)));
+            HookMiner.find(CREATE2_DEPLOYER, DPPLibrary.PERMISSION_FLAGS, type(DesiredPricePool).creationCode, constructorArgs);
 
         // ----------------------------- //
         // Deploy the hook using CREATE2 //
         // ----------------------------- //
         vm.broadcast();
-        Counter counter = new Counter{salt: salt}(manager);
-        require(address(counter) == hookAddress, "CounterScript: hook address mismatch");
-        
-        // Verify the address deployed
-        console.log("Counter deployed at:", address(counter));
+
+        DesiredPricePool dpp = new DesiredPricePool{salt: salt}(manager, posm, msg.sender);
+        require(address(dpp) == hookAddress, "DesiredPricePoolScript: hook address mismatch");
+        console.log("dpp deployed at:", address(dpp));
+
 
         // Additional helpers for interacting with the pool
         vm.startBroadcast();
@@ -70,13 +69,16 @@ contract CounterScript is Script, DeployPermit2 {
         (lpRouter, swapRouter,) = deployRouters(manager);
         vm.stopBroadcast();
 
+        // Log the addresses of the deployed contracts
+        console.log("DesiredPricePool deployed at:", address(dpp));
         console.log("PoolManager deployed at:", address(manager));
         console.log("PositionManager deployed at:", address(posm));
-        console.log("PoolSwapTest (SwapRouter) deployed at:", address(swapRouter)); // <-- NEED THIS
+        console.log("PoolSwapTest deployed at:", address(swapRouter));
 
-        // test the lifecycle (create pool, add liquidity, swap)
+        // Test the lifecycle (create pool, add liquidity, swap)
+
         vm.startBroadcast();
-        testLifecycle(address(counter));
+        testLifecycle(dpp);
         vm.stopBroadcast();
     }
 
@@ -114,6 +116,11 @@ contract CounterScript is Script, DeployPermit2 {
     function deployTokens() internal returns (MockERC20 token0, MockERC20 token1) {
         MockERC20 tokenA = new MockERC20("MockA", "A", 18);
         MockERC20 tokenB = new MockERC20("MockB", "B", 18);
+
+        // Log the addresses of the deployed tokens
+        console.log("Token0 deployed at:", address(token0));
+        console.log("Token1 deployed at:", address(token1));
+
         if (uint160(address(tokenA)) < uint160(address(tokenB))) {
             token0 = tokenA;
             token1 = tokenB;
@@ -123,18 +130,24 @@ contract CounterScript is Script, DeployPermit2 {
         }
     }
 
-    function testLifecycle(address hook) internal {
+    function testLifecycle(DesiredPricePool dpp) internal {
         (MockERC20 token0, MockERC20 token1) = deployTokens();
+
         console.log("Token0 deployed at:", address(token0)); // <-- NEED THIS
         console.log("Token1 deployed at:", address(token1)); // <-- NEED THIS
+
         token0.mint(msg.sender, 100_000 ether);
         token1.mint(msg.sender, 100_000 ether);
 
         // initialize the pool
-        int24 tickSpacing = 60;
-        PoolKey memory poolKey =
-            PoolKey(Currency.wrap(address(token0)), Currency.wrap(address(token1)), 3000, tickSpacing, IHooks(hook));
-        manager.initialize(poolKey, Constants.SQRT_PRICE_1_1);
+        int24 tickSpacing = 64;
+        PoolKey memory poolKey = dpp.createPool(
+            Currency.wrap(address(token0)),
+            Currency.wrap(address(token1)),
+            tickSpacing,
+            Constants.SQRT_PRICE_1_1,
+            0
+        );
 
         // approve the tokens to the routers
         token0.approve(address(lpRouter), type(uint256).max);
