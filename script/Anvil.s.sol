@@ -30,6 +30,8 @@ import {DesiredPricePool} from "../src/DesiredPricePool.sol";
 import {DeployPermit2} from "../test/utils/forks/DeployPermit2.sol";
 import {EasyPosm} from "../test/utils/EasyPosm.sol";
 
+import {BalanceDelta, BalanceDeltaLibrary} from "v4-core/src/types/BalanceDelta.sol";
+
 /// @notice Forge script for deploying v4 & hooks to **anvil**
 contract DesiredPricePoolScript is Script, DeployPermit2 {
     using EasyPosm for IPositionManager;
@@ -159,12 +161,40 @@ contract DesiredPricePoolScript is Script, DeployPermit2 {
         }
     }
 
+    using BalanceDeltaLibrary for BalanceDelta;
+
     function _exampleAddLiquidity(PoolKey memory poolKey, int24 tickLower, int24 tickUpper) internal {
         // provisions full-range liquidity twice. Two different periphery contracts used for example purposes.
         IPoolManager.ModifyLiquidityParams memory liqParams =
             IPoolManager.ModifyLiquidityParams(tickLower, tickUpper, 100 ether, 0);
         lpRouter.modifyLiquidity(poolKey, liqParams, "");
+        console.log("    Liquidity added via lpRouter.");
 
-        posm.mint(poolKey, tickLower, tickUpper, 100e18, 10_000e18, 10_000e18, msg.sender, block.timestamp + 300, "");
+        // Using POSM to mint the actual position NFT
+        uint128 liquidityAmount = 100e18; // Example L unit amount for POSM
+        // --- No HookReward import needed if HOOK_DATA_PREFIX is not used here ---
+        // --- Empty hookData for initial mint ---
+        bytes memory hookData = ""; // why not 0x
+
+        // --- Correct variable declaration and assignment ---
+        uint256 tokenId;        // To store the first return value
+        BalanceDelta amounts;   // To store the second return value
+        
+        console.log("    Liquidity mint starts");
+
+        (tokenId, amounts) = posm.mint(
+                poolKey,
+                tickLower,
+                tickUpper,
+                100e18, //liquidityAmount
+                10_000e18, // amount0Min example
+                10_000e18, // amount1Min example
+                msg.sender, // Mint NFT to the user/deployer
+                block.timestamp + 300,
+                hookData
+            );
+        console.log("    Liquidity added via posm. TokenId:", tokenId);
+        console.log("      Amount0 Delta (from posm.mint):", amounts.amount0());
+        console.log("      Amount1 Delta (from posm.mint):", amounts.amount1());
     }
 }
