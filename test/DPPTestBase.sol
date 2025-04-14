@@ -18,8 +18,8 @@ import {IPositionManager} from "v4-periphery/src/interfaces/IPositionManager.sol
 import {PositionInfo, PositionInfoLibrary} from "v4-periphery/src/libraries/PositionInfoLibrary.sol";
 
 import {DesiredPricePool} from "../src/DesiredPricePool.sol";
+import {DesiredPricePoolHelper} from "../src/DesiredPricePoolHelper.sol";
 import {DPPConstants} from "../src/libraries/DPPConstants.sol";
-import {EasyPosm} from "./utils/EasyPosm.sol";
 import {Fixtures} from "./utils/Fixtures.sol";
 
 abstract contract DPPTestBase is Test, Fixtures {
@@ -27,9 +27,9 @@ abstract contract DPPTestBase is Test, Fixtures {
     using PoolIdLibrary for PoolKey;
     using PositionInfoLibrary for PositionInfo;
     using StateLibrary for IPoolManager;
-    using EasyPosm for IPositionManager;
 
     DesiredPricePool dpp;
+    DesiredPricePoolHelper dppHelper;
     PoolId poolId;
 
     function setUp() public {
@@ -43,6 +43,7 @@ abstract contract DPPTestBase is Test, Fixtures {
         bytes memory constructorArgs = abi.encode(manager, posm, address(this));
         deployCodeTo("DesiredPricePool.sol:DesiredPricePool", constructorArgs, flags);
         dpp = DesiredPricePool(flags);
+        dppHelper = new DesiredPricePoolHelper(dpp);
 
         // Create the pool
         key = dpp.createPool(currency0, currency1, 64, SQRT_PRICE_1_1, 0);
@@ -56,16 +57,13 @@ abstract contract DPPTestBase is Test, Fixtures {
             TickMath.getSqrtPriceAtTick(tickUpper),
             liquidity
         );
-        (tokenId,) = posm.mint(
+        (tokenId,) = dppHelper.mint(
             key,
             tickLower,
             tickUpper,
             liquidity,
             amount0Expected + 1,
-            amount1Expected + 1,
-            address(this),
-            block.timestamp,
-            ZERO_BYTES
+            amount1Expected + 1
         );
     }
 }
