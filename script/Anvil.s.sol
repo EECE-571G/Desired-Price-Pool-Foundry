@@ -21,6 +21,7 @@ import {PositionManager} from "v4-periphery/src/PositionManager.sol";
 import {IPositionDescriptor} from "v4-periphery/src/interfaces/IPositionDescriptor.sol";
 import {IWETH9} from "v4-periphery/src/interfaces/external/IWETH9.sol";
 
+import {Arrays} from "@openzeppelin/contracts/utils/Arrays.sol";
 import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 
@@ -28,7 +29,6 @@ import {DPPLibrary} from "../src/libraries/DPPLibrary.sol";
 import {DesiredPricePool} from "../src/DesiredPricePool.sol";
 import {DeployPermit2} from "../test/utils/forks/DeployPermit2.sol";
 import {EasyPosm} from "../test/utils/EasyPosm.sol";
-
 
 /// @notice Forge script for deploying v4 & hooks to **anvil**
 contract DesiredPricePoolScript is Script, DeployPermit2 {
@@ -48,8 +48,9 @@ contract DesiredPricePoolScript is Script, DeployPermit2 {
 
         bytes memory constructorArgs = abi.encode(manager, posm, msg.sender);
         // Mine a salt that will produce a hook address with the correct permissions
-        (address hookAddress, bytes32 salt) =
-            HookMiner.find(CREATE2_DEPLOYER, DPPLibrary.PERMISSION_FLAGS, type(DesiredPricePool).creationCode, constructorArgs);
+        (address hookAddress, bytes32 salt) = HookMiner.find(
+            CREATE2_DEPLOYER, DPPLibrary.PERMISSION_FLAGS, type(DesiredPricePool).creationCode, constructorArgs
+        );
 
         // ----------------------------- //
         // Deploy the hook using CREATE2 //
@@ -68,9 +69,8 @@ contract DesiredPricePoolScript is Script, DeployPermit2 {
         console.log("DesiredPricePool deployed at:", address(dpp));
         console.log("PoolManager deployed at:", address(manager));
         console.log("PositionManager deployed at:", address(posm));
-        console.log("PoolSwapTest deployed at:", address(swapRouter));
 
-        // Test the lifecycle (create pool, add liquidity, swap)
+        // Test the lifecycle (create pool, add liquidity)
         vm.startBroadcast();
         testLifecycle(dpp);
         vm.stopBroadcast();
@@ -107,56 +107,56 @@ contract DesiredPricePoolScript is Script, DeployPermit2 {
         permit2.approve(Currency.unwrap(currency), address(_posm), type(uint160).max, type(uint48).max);
     }
 
-    function deployTokens() internal returns (MockERC20 token0, MockERC20 token1) {
-        MockERC20 tokenA = new MockERC20("MockA", "A", 18);
-        MockERC20 tokenB = new MockERC20("MockB", "B", 18);
+    function deployTokens(uint256 count) internal returns (MockERC20[] memory tokens) {
+        require(count <= 26, "Too many tokens requested");
+        tokens = new MockERC20[](count);
+        address[] memory tokenAddresses = new address[](count);
+        for (uint256 i = 0; i < count; i++) {
+            bytes memory letter = new bytes(1);
+            letter[0] = bytes1(uint8(65 + i));
+            string memory name = string(abi.encodePacked("Mock", letter));
+            string memory symbol = string(letter);
+            tokens[i] = new MockERC20(name, symbol, 18);
+            tokenAddresses[i] = address(tokens[i]);
+        }
 
-        if (uint160(address(tokenA)) < uint160(address(tokenB))) {
-            token0 = tokenA;
-            token1 = tokenB;
-        } else {
-            token0 = tokenB;
-            token1 = tokenA;
+        tokenAddresses = Arrays.sort(tokenAddresses);
+        for (uint256 i = 0; i < count; i++) {
+            tokens[i] = MockERC20(tokenAddresses[i]);
         }
 
         // Log the addresses of the deployed tokens
-        console.log("Token0 deployed at:", address(token0));
-        console.log("Token1 deployed at:", address(token1));
+        for (uint256 i = 0; i < count; i++) {
+            console.log("Token %s (%s) deployed at: %s", i, tokens[i].name(), tokenAddresses[i]);
+        }
     }
 
     function testLifecycle(DesiredPricePool dpp) internal {
-        (MockERC20 token0, MockERC20 token1) = deployTokens();
+        uint256 tokenCount = 3;
+        MockERC20[] memory tokens = deployTokens(tokenCount);
 
-        token0.mint(msg.sender, 100_000 ether);
-        token1.mint(msg.sender, 100_000 ether);
+        // Mint and approve the tokens
+        for (uint256 i = 0; i < tokenCount; i++) {
+            tokens[i].mint(msg.sender, 100_000 ether);
+            tokens[i].approve(address(lpRouter), type(uint256).max);
+            tokens[i].approve(address(swapRouter), type(uint256).max);
+            approvePosmCurrency(posm, Currency.wrap(address(tokens[i])));
+        }
 
-        // initialize the pool
+        // Initialize pools and add full-range liquidity
         int24 tickSpacing = 64;
-        PoolKey memory poolKey = dpp.createPool(
-            Currency.wrap(address(token0)),
-            Currency.wrap(address(token1)),
-            tickSpacing,
-            Constants.SQRT_PRICE_1_1,
-            0
-        );
-
-        // approve the tokens to the routers
-        token0.approve(address(lpRouter), type(uint256).max);
-        token1.approve(address(lpRouter), type(uint256).max);
-        token0.approve(address(swapRouter), type(uint256).max);
-        token1.approve(address(swapRouter), type(uint256).max);
-        approvePosmCurrency(posm, Currency.wrap(address(token0)));
-        approvePosmCurrency(posm, Currency.wrap(address(token1)));
-
-        // add full range liquidity to the pool
         int24 tickLower = TickMath.minUsableTick(tickSpacing);
         int24 tickUpper = TickMath.maxUsableTick(tickSpacing);
-        _exampleAddLiquidity(poolKey, tickLower, tickUpper);
-        console.log("tickUpper", tickLower);
-        console.log("tickUpper", tickUpper);
-
-        // swap some tokens
-        // _exampleSwap(poolKey);
+        for (uint256 i = 0; i < tokenCount - 1; i++) {
+            Currency first = Currency.wrap(address(tokens[i]));
+            for (uint256 j = i + 1; j < tokenCount; j++) {
+                PoolKey memory key =
+                    dpp.createPool(first, Currency.wrap(address(tokens[j])), tickSpacing, Constants.SQRT_PRICE_1_1, 0);
+                _exampleAddLiquidity(key, tickLower, tickUpper);
+                console.log("tickLower", tickLower);
+                console.log("tickLower", tickLower);
+            }
+        }
     }
 
     function _exampleAddLiquidity(PoolKey memory poolKey, int24 tickLower, int24 tickUpper) internal {
@@ -166,18 +166,5 @@ contract DesiredPricePoolScript is Script, DeployPermit2 {
         lpRouter.modifyLiquidity(poolKey, liqParams, "");
 
         posm.mint(poolKey, tickLower, tickUpper, 100e18, 10_000e18, 10_000e18, msg.sender, block.timestamp + 300, "");
-    }
-
-    function _exampleSwap(PoolKey memory poolKey) internal {
-        bool zeroForOne = true;
-        int256 amountSpecified = 1 ether;
-        IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
-            zeroForOne: zeroForOne,
-            amountSpecified: amountSpecified,
-            sqrtPriceLimitX96: zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1 // unlimited impact
-        });
-        PoolSwapTest.TestSettings memory testSettings =
-            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
-        swapRouter.swap(poolKey, params, testSettings, "");
     }
 }
