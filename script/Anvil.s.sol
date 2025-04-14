@@ -152,6 +152,8 @@ contract DesiredPricePoolScript is Script, DeployPermit2 {
         int24 tickLower = TickMath.minUsableTick(tickSpacing);
         int24 tickUpper = TickMath.maxUsableTick(tickSpacing);
         _exampleAddLiquidity(poolKey, tickLower, tickUpper);
+        console.log("tickUpper", tickLower);
+        console.log("tickUpper", tickUpper);
 
         // swap some tokens
         // _exampleSwap(poolKey);
