@@ -22,6 +22,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Owned} from "solmate/src/auth/Owned.sol";
 
+import {IDesiredPricePool} from "./interfaces/IDesiredPricePool.sol";
 import {IDesiredPricePoolOwner} from "./interfaces/IDesiredPricePoolOwner.sol";
 import {BeforeSwapInfo, BeforeSwapInfoLibrary, toBeforeSwapInfo} from "./types/BeforeSwapInfo.sol";
 import {PriceUpdate} from "./types/PriceUpdate.sol";
@@ -30,7 +31,7 @@ import {Math as Math2} from "./utils/Math.sol";
 import {DesiredPrice} from "./DesiredPrice.sol";
 import {HookReward} from "./HookReward.sol";
 
-contract DesiredPricePool is IDesiredPricePoolOwner, HookReward, BaseHook {
+contract DesiredPricePool is IDesiredPricePool, IDesiredPricePoolOwner, HookReward, BaseHook {
     using StateLibrary for IPoolManager;
     using PoolIdLibrary for PoolKey;
     using BalanceDeltaLibrary for BalanceDelta;
@@ -51,7 +52,7 @@ contract DesiredPricePool is IDesiredPricePoolOwner, HookReward, BaseHook {
     // a single hook contract should be able to service multiple pools
     // ---------------------------------------------------------------
 
-    mapping(PoolId => uint24 pip) public baseFees;
+    mapping(PoolId => uint24 pip) public lpFees;
     mapping(PoolId => uint8 percent) public hookFees;
 
     BeforeSwapInfo private _beforeSwapInfo = BeforeSwapInfoLibrary.UNSET;
@@ -84,8 +85,8 @@ contract DesiredPricePool is IDesiredPricePoolOwner, HookReward, BaseHook {
         });
         PoolId id = key.toId();
 
-        require(baseFees[id] == 0, "Pool already exists");
-        baseFees[id] = uint24(_tickSpacing) * DEFAULT_BASE_FEE_PER_TICK;
+        require(lpFees[id] == 0, "Pool already exists");
+        lpFees[id] = uint24(_tickSpacing) * DEFAULT_BASE_FEE_PER_TICK;
         hookFees[id] = DEFAULT_HOOK_FEE;
         _setDesiredPrice(id, _desiredPriceTick);
 
@@ -113,7 +114,7 @@ contract DesiredPricePool is IDesiredPricePoolOwner, HookReward, BaseHook {
 
     function _beforeInitialize(address sender, PoolKey calldata key, uint160) internal view override returns (bytes4) {
         PoolId id = key.toId();
-        if (sender != address(this) || baseFees[id] == 0) {
+        if (sender != address(this) || lpFees[id] == 0) {
             UnauthorizedPoolInitialization.selector.revertWith();
         }
         return BaseHook.beforeInitialize.selector;
@@ -134,7 +135,7 @@ contract DesiredPricePool is IDesiredPricePoolOwner, HookReward, BaseHook {
         uint16 currentProtocolFee = swapParams.zeroForOne
             ? ProtocolFeeLibrary.getZeroForOneFee(protocolFee)
             : ProtocolFeeLibrary.getOneForZeroFee(protocolFee);
-        uint24 fee = baseFees[id];
+        uint24 fee = lpFees[id];
         uint24 swapFee = ProtocolFeeLibrary.calculateSwapFee(currentProtocolFee, fee);
         _beforeSwapInfo = toBeforeSwapInfo(priceTick, swapFee);
         return (BaseHook.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, fee | LPFeeLibrary.OVERRIDE_FEE_FLAG);
@@ -153,14 +154,14 @@ contract DesiredPricePool is IDesiredPricePoolOwner, HookReward, BaseHook {
         PoolId id = key.toId();
         bool chargeCurrency1 = swapParams.zeroForOne == (swapParams.amountSpecified < 0);
         int128 deltaUnspecified = chargeCurrency1 ? delta.amount1() : delta.amount0();
-        uint24 baseFee = baseFees[id];
+        uint24 baseFee = lpFees[id];
         uint24 hookFeePip = baseFee * hookFees[id] / 100;
         uint256 hookFeeAmountBase =
             Math2.abs(int256(deltaUnspecified)).toUint256() * (1e6 - beforeSwapInfo.swapFee()) * uint256(hookFeePip) / 1e12;
 
         (, int24 afterSwapTick,,) = poolManager.getSlot0(id);
-        int24 desiredPrice = desiredPriceTicks[id];
-        int24 tickDiff = Math2.abs24(afterSwapTick - desiredPrice) - Math2.abs24(beforeSwapInfo.tick() - desiredPrice);
+        int24 dp = desiredPrice[id];
+        int24 tickDiff = Math2.abs24(afterSwapTick - dp) - Math2.abs24(beforeSwapInfo.tick() - dp);
 
         uint256 hookFeeAmount; // 1 / (1 + tickDiff / (4 * sqrt(tickSpacing)))
         if (tickDiff == 0) {
