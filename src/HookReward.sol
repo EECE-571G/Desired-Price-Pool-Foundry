@@ -17,6 +17,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 
 import {IHookReward} from "./interfaces/IHookReward.sol";
+import {DPPConstants} from "./libraries/DPPConstants.sol";
 import {Reward, RewardQueue} from "./types/Reward.sol";
 import {Math as Math2} from "./utils/Math.sol";
 import {DesiredPrice} from "./DesiredPrice.sol";
@@ -31,11 +32,7 @@ abstract contract HookReward is DesiredPrice, ReentrancyGuard, IHookReward {
 
     error InvalidHookData(bytes hookData);
 
-    /// @notice The maximum tick spacing for the pool.
-    int24 public constant MAX_TICK_SPACING = 200;
     uint24 public constant REWARD_LOCK_PERIOD = 1 days;
-    bytes4 public constant HOOK_DATA_PREFIX = bytes4("DPP:");
-    uint256 public constant HOOK_DATA_LENGTH = 36; // 4 + 32 bytes
 
     IPositionManager internal immutable posm;
 
@@ -109,7 +106,7 @@ abstract contract HookReward is DesiredPrice, ReentrancyGuard, IHookReward {
 
     function _calculateRewardRange(int24 _tickSpacing) internal pure returns (int24 range) {
         uint256 tickSpacing = uint24(_tickSpacing);
-        return ((Math.log2(tickSpacing) + 2) * uint24(MAX_TICK_SPACING) >> 2).toInt256().toInt24();
+        return ((Math.log2(tickSpacing) + 2) * uint24(DPPConstants.MAX_TICK_SPACING) >> 2).toInt256().toInt24();
     }
 
     function _calculateWeight(
@@ -247,7 +244,7 @@ abstract contract HookReward is DesiredPrice, ReentrancyGuard, IHookReward {
         }
         bytes4 prefix;
         (prefix, positionId) = abi.decode(hookData, (bytes4, uint256));
-        if (prefix != HOOK_DATA_PREFIX) {
+        if (prefix != DPPConstants.HOOK_DATA_PREFIX) {
             revert InvalidHookData(hookData);
         }
         PositionInfo position = posm.positionInfo(positionId);

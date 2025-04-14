@@ -24,6 +24,7 @@ import {Owned} from "solmate/src/auth/Owned.sol";
 
 import {IDesiredPricePool} from "./interfaces/IDesiredPricePool.sol";
 import {IDesiredPricePoolOwner} from "./interfaces/IDesiredPricePoolOwner.sol";
+import {DPPConstants} from "./libraries/DPPConstants.sol";
 import {BeforeSwapInfo, BeforeSwapInfoLibrary, toBeforeSwapInfo} from "./types/BeforeSwapInfo.sol";
 import {PriceUpdate} from "./types/PriceUpdate.sol";
 import {Reward, RewardQueue} from "./types/Reward.sol";
@@ -71,7 +72,7 @@ contract DesiredPricePool is IDesiredPricePool, IDesiredPricePoolOwner, HookRewa
         int24 _desiredPriceTick
     ) external onlyOwner returns (PoolKey memory key) {
         require(!(_currency0 == _currency1), "Invalid currency pair");
-        require(_tickSpacing >= 1 && _tickSpacing <= MAX_TICK_SPACING, "Invalid tick spacing");
+        require(_tickSpacing >= 1 && _tickSpacing <= DPPConstants.MAX_TICK_SPACING, "Invalid tick spacing");
 
         if (_currency0 > _currency1) {
             (_currency0, _currency1) = (_currency1, _currency0);
