@@ -154,7 +154,7 @@ contract DesiredPricePoolScript is Script, DeployPermit2 {
         _exampleAddLiquidity(poolKey, tickLower, tickUpper);
 
         // swap some tokens
-        _exampleSwap(poolKey);
+        // _exampleSwap(poolKey);
     }
 
     function _exampleAddLiquidity(PoolKey memory poolKey, int24 tickLower, int24 tickUpper) internal {
