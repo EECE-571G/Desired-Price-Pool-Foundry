@@ -25,7 +25,7 @@ import {Arrays} from "@openzeppelin/contracts/utils/Arrays.sol";
 import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 
-import {DPPLibrary} from "../src/libraries/DPPLibrary.sol";
+import {DPPConstants} from "../src/libraries/DPPConstants.sol";
 import {DesiredPricePool} from "../src/DesiredPricePool.sol";
 import {DeployPermit2} from "../test/utils/forks/DeployPermit2.sol";
 import {EasyPosm} from "../test/utils/EasyPosm.sol";
@@ -49,7 +49,7 @@ contract DesiredPricePoolScript is Script, DeployPermit2 {
         bytes memory constructorArgs = abi.encode(manager, posm, msg.sender);
         // Mine a salt that will produce a hook address with the correct permissions
         (address hookAddress, bytes32 salt) = HookMiner.find(
-            CREATE2_DEPLOYER, DPPLibrary.PERMISSION_FLAGS, type(DesiredPricePool).creationCode, constructorArgs
+            CREATE2_DEPLOYER, DPPConstants.PERMISSION_FLAGS, type(DesiredPricePool).creationCode, constructorArgs
         );
 
         // ----------------------------- //
