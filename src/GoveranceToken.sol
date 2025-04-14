@@ -21,7 +21,7 @@ contract GoveranceToken is IGoveranceToken, IGoveranceTokenOwner, ERC20Pausable,
     uint256 constant TOTAL_SUPPLY = 1_000_000 * 1e18; // 1 million tokens
 
     address private immutable _creator;
-    uint256 private _totalLockedBalance;
+    uint256 public totalLockedBalance;
     mapping(address => uint256) private _lockedBalances;
 
     constructor(address owner) ERC20(NAME, SYMBOL) Owned(owner) {
@@ -41,16 +41,12 @@ contract GoveranceToken is IGoveranceToken, IGoveranceTokenOwner, ERC20Pausable,
     function _update(address from, address to, uint256 value) internal override {
         if (from == address(this)) {
             uint256 selfBalance = balanceOf(from);
-            uint256 locked = _totalLockedBalance;
+            uint256 locked = totalLockedBalance;
             if (selfBalance < value + locked) {
                 revert BalanceLocked(locked);
             }
         }
         super._update(from, to, value);
-    }
-
-    function totalLockedBalance() external view returns (uint256) {
-        return _totalLockedBalance;
     }
 
     function lockedBalanceOf(address account) external view returns (uint256) {
@@ -71,13 +67,13 @@ contract GoveranceToken is IGoveranceToken, IGoveranceTokenOwner, ERC20Pausable,
 
     function lock(address account, uint256 amount) public onlyCreator {
         _lockedBalances[account] += amount;
-        _totalLockedBalance += amount;
+        totalLockedBalance += amount;
         _update(account, address(this), amount);
     }
 
     function unlock(address account, uint256 amount) public onlyCreator {
         _lockedBalances[account] -= amount;
-        _totalLockedBalance -= amount;
+        totalLockedBalance -= amount;
         _update(address(this), account, amount);
     }
 }

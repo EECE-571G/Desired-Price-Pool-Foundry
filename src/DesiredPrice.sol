@@ -34,7 +34,7 @@ abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, Context, Ow
     mapping(PoolId => mapping(address => VoteInfo)) internal voteInfos;
     mapping(PoolId => Poll.State) internal polls;
 
-    mapping(PoolId => int24 tick) public desiredPriceTicks;
+    mapping(PoolId => int24 tick) public desiredPrice;
     mapping(PoolId => uint24) internal priceUpdateIds;
     mapping(PoolId => mapping(uint24 => PriceUpdate)) internal priceUpdates;
 
@@ -119,13 +119,13 @@ abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, Context, Ow
     function _setDesiredPrice(PoolId id, int24 priceTick) internal {
         PriceUpdate memory update = PriceUpdate({
             timestamp: block.timestamp.toUint40(),
-            oldPriceTick: desiredPriceTicks[id],
+            oldPriceTick: desiredPrice[id],
             newPriceTick: priceTick
         });
         uint24 nextId = priceUpdateIds[id];
         priceUpdates[id][nextId] = update;
         priceUpdateIds[id] = nextId + 1;
-        desiredPriceTicks[id] = priceTick;
+        desiredPrice[id] = priceTick;
         emit PriceUpdated(id, update.oldPriceTick, priceTick);
     }
 
@@ -221,7 +221,7 @@ abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, Context, Ow
     function _executePoll(PoolId id, Poll.State storage poll) private {
         (Poll.Result result, int24 tickDelta) = poll.getResult();
         if (tickDelta != 0) {
-            int24 currentTick = desiredPriceTicks[id];
+            int24 currentTick = desiredPrice[id];
             _setDesiredPrice(id, currentTick + tickDelta);
         }
         emit PollEnded(id, poll.id, result, poll.startTime, poll.totalVotes);

@@ -37,15 +37,19 @@ abstract contract HookReward is DesiredPrice, ReentrancyGuard, IHookReward {
     bytes4 public constant HOOK_DATA_PREFIX = bytes4("DPP:");
     uint256 public constant HOOK_DATA_LENGTH = 36; // 4 + 32 bytes
 
+    IPositionManager internal immutable posm;
+
     mapping(PoolId => BalanceDelta) internal feesCollected;
     mapping(PoolId => uint256) internal totalWeights;
     mapping(uint256 positionId => RewardQueue) internal rewards;
     mapping(uint256 positionId => uint256) internal collectableRewards;
 
-    IPositionManager public immutable posm;
-
     constructor(IPositionManager _positionManager) {
         posm = _positionManager;
+    }
+
+    function positionManager() external view returns (IPositionManager) {
+        return posm;
     }
 
     function getCollectableRewardWeight(uint256 positionId) external returns (uint256 weight) {
@@ -152,7 +156,7 @@ abstract contract HookReward is DesiredPrice, ReentrancyGuard, IHookReward {
         uint256 positionId,
         IPoolManager.ModifyLiquidityParams calldata params
     ) internal {
-        int24 desiredPrice = desiredPriceTicks[id];
+        int24 desiredPrice = desiredPrice[id];
         int24 range = _calculateRewardRange(tickSpacing);
         if (params.tickLower < desiredPrice - range || params.tickUpper >= desiredPrice + range) {
             return;
