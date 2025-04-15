@@ -103,42 +103,35 @@ contract DesiredPricePoolHelper is SafeCallback {
     }
 
     function burn(uint256 tokenId) external returns (BalanceDelta delta) {
-        (IPositionManager posm, Currency currency0, Currency currency1, bytes memory hookData, uint256 deadline) =
-            _getParams(tokenId);
+        (IPositionManager posm, bytes memory hookData, uint256 deadline) = _getParams(tokenId);
         IERC721(address(posm)).transferFrom(msg.sender, address(this), tokenId);
         delta = posm.burn(tokenId, 0, 0, msg.sender, deadline, hookData);
-        _send(currency0, currency1, delta);
     }
 
     function addLiquidity(uint256 tokenId, uint256 liquidity) external payable borrow(tokenId) returns (BalanceDelta delta) {
-        (IPositionManager posm, Currency currency0, Currency currency1, bytes memory hookData, uint256 deadline) =
-            _getParams(tokenId);
+        (IPositionManager posm, bytes memory hookData, uint256 deadline) = _getParams(tokenId);
         (PoolKey memory key, PositionInfo info) = posm.getPoolAndPositionInfo(tokenId);
         (uint256 amount0Max, uint256 amount1Max) = getAmountsForLiquidity(
             key.toId(), info.tickLower(), info.tickUpper(), liquidity
         );
         amount0Max += 1;
         amount1Max += 1;
-        _receive(currency0, amount0Max);
-        _receive(currency1, amount1Max);
+        _receive(key.currency0, amount0Max);
+        _receive(key.currency1, amount1Max);
         delta = posm.increaseLiquidity(tokenId, liquidity, amount0Max, amount1Max, deadline, hookData);
-        _send(currency0, currency1, amount0Max, amount1Max, delta);
+        _send(key.currency0, key.currency1, amount0Max, amount1Max, delta);
     }
 
     function removeLiquidity(uint256 tokenId, uint256 liquidity) external borrow(tokenId) returns (BalanceDelta delta) {
-        (IPositionManager posm, Currency currency0, Currency currency1, bytes memory hookData, uint256 deadline) =
-            _getParams(tokenId);
+        (IPositionManager posm, bytes memory hookData, uint256 deadline) = _getParams(tokenId);
         delta = posm.decreaseLiquidity(
-            tokenId, liquidity, type(uint256).max, type(uint256).max, msg.sender, deadline, hookData
+            tokenId, liquidity, 0, 0, msg.sender, deadline, hookData
         );
-        _send(currency0, currency1, delta);
     }
 
     function collect(uint256 tokenId) internal returns (BalanceDelta delta) {
-        (IPositionManager posm, Currency currency0, Currency currency1, bytes memory hookData, uint256 deadline) =
-            _getParams(tokenId);
+        (IPositionManager posm, bytes memory hookData, uint256 deadline) = _getParams(tokenId);
         delta = posm.collect(tokenId, 0, 0, msg.sender, deadline, hookData);
-        _send(currency0, currency1, delta);
     }
 
     function swapExactIn(PoolKey memory poolKey, bool zeroForOne, uint256 amount, uint160 sqrtPriceLimitX96)
@@ -179,10 +172,9 @@ contract DesiredPricePoolHelper is SafeCallback {
     function _getParams(uint256 tokenId)
         internal
         view
-        returns (IPositionManager posm, Currency currency0, Currency currency1, bytes memory hookData, uint256 deadline)
+        returns (IPositionManager posm, bytes memory hookData, uint256 deadline)
     {
         posm = dpp.positionManager();
-        (currency0, currency1) = posm.getCurrencies(tokenId);
         hookData = HookData.encodeLiquidityHookData(tokenId);
         deadline = type(uint256).max;
     }
@@ -210,14 +202,13 @@ contract DesiredPricePoolHelper is SafeCallback {
         }
     }
 
-    function _send(Currency currency0, Currency currency1, BalanceDelta delta) internal {
-        currency0.transfer(msg.sender, delta.amount0().toUint128());
-        currency1.transfer(msg.sender, delta.amount1().toUint128());
-    }
-
-    function _send(Currency currency0, Currency currency1, uint256 amount0Max, uint256 amount1Max, BalanceDelta delta)
-        internal
-    {
+    function _send(
+        Currency currency0, 
+        Currency currency1, 
+        uint256 amount0Max, 
+        uint256 amount1Max, 
+        BalanceDelta delta
+    ) internal {
         int256 excess0 = amount0Max.toInt256() + delta.amount0();
         int256 excess1 = amount1Max.toInt256() + delta.amount1();
         if (excess0 > 0) {
