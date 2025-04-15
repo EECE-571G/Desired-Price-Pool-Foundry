@@ -21,6 +21,7 @@ import {PositionManager} from "v4-periphery/src/PositionManager.sol";
 import {IPositionDescriptor} from "v4-periphery/src/interfaces/IPositionDescriptor.sol";
 import {IWETH9} from "v4-periphery/src/interfaces/external/IWETH9.sol";
 
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {Arrays} from "@openzeppelin/contracts/utils/Arrays.sol";
 import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
@@ -131,6 +132,7 @@ contract DesiredPricePoolScript is Script, DeployPermit2 {
             tokens[i].mint(msg.sender, 100_000 ether);
             tokens[i].approve(address(dppHelper), type(uint256).max);
         }
+        IERC721(address(posm)).setApprovalForAll(address(dppHelper), true);
 
         // Initialize pools and add full-range liquidity
         int24 tickSpacing = 64;
@@ -141,7 +143,7 @@ contract DesiredPricePoolScript is Script, DeployPermit2 {
             for (uint256 j = i + 1; j < tokenCount; j++) {
                 PoolKey memory key =
                     dpp.createPool(first, Currency.wrap(address(tokens[j])), tickSpacing, Constants.SQRT_PRICE_1_1, 0);
-                dppHelper.mint(key, tickLower, tickUpper, 100 ether, 10000 ether, 10000 ether);
+                dppHelper.mint(key, tickLower, tickUpper, 100 ether);
             }
         }
     }

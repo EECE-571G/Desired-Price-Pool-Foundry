@@ -2,21 +2,25 @@
 pragma solidity ^0.8.24;
 
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
+import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
+import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {TransientStateLibrary} from "v4-core/src/libraries/TransientStateLibrary.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {Currency, CurrencyLibrary} from "v4-core/src/types/Currency.sol";
+import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
 import {CurrencySettler} from "v4-core/test/utils/CurrencySettler.sol";
+import {LiquidityAmounts} from "v4-core/test/utils/LiquidityAmounts.sol";
 
 import {ImmutableState} from "v4-periphery/src/base/ImmutableState.sol";
 import {SafeCallback} from "v4-periphery/src/base/SafeCallback.sol";
 import {Permit2Forwarder} from "v4-periphery/src/base/Permit2Forwarder.sol";
 import {IPositionManager} from "v4-periphery/src/interfaces/IPositionManager.sol";
-import {Actions} from "v4-periphery/src/libraries/Actions.sol";
 import {PositionInfo, PositionInfoLibrary} from "v4-periphery/src/libraries/PositionInfoLibrary.sol";
 import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import {IDesiredPricePool} from "./interfaces/IDesiredPricePool.sol";
@@ -27,6 +31,8 @@ import {SafeCast128} from "./utils/SafeCast128.sol";
 contract DesiredPricePoolHelper is SafeCallback {
     using CurrencyLibrary for Currency;
     using CurrencySettler for Currency;
+    using PoolIdLibrary for PoolKey;
+    using StateLibrary for IPoolManager;
     using TransientStateLibrary for IPoolManager;
     using PositionInfoLibrary for PositionInfo;
     using EasyPosm for IPositionManager;
@@ -43,16 +49,50 @@ contract DesiredPricePoolHelper is SafeCallback {
         dpp = _dpp;
     }
 
+    modifier borrow(uint256 tokenId) {
+        IERC721 positionToken = IERC721(address(dpp.positionManager()));
+        positionToken.transferFrom(msg.sender, address(this), tokenId);
+        _;
+        positionToken.transferFrom(address(this), msg.sender, tokenId);
+    }
+
+    function poolId(PoolKey memory key) public pure returns (PoolId) {
+        return key.toId();
+    }
+
+    function currentPrice(PoolId id) public view returns (int24 tick, uint160 sqrtPriceX96) {
+        IPoolManager pm = dpp.poolManager();
+        (sqrtPriceX96, tick,,) = pm.getSlot0(id);
+    }
+
+    function getAmountsForLiquidity(
+        PoolId id,
+        int24 tickLower,
+        int24 tickUpper,
+        uint256 liquidity
+    ) public view returns (uint256 amount0, uint256 amount1) {
+        (,uint160 sqrtPriceX96) = currentPrice(id);
+        return LiquidityAmounts.getAmountsForLiquidity(
+            sqrtPriceX96,
+            TickMath.getSqrtPriceAtTick(tickLower),
+            TickMath.getSqrtPriceAtTick(tickUpper),
+            liquidity.toUint128()
+        );
+    }
+
     function mint(
         PoolKey memory poolKey,
         int24 tickLower,
         int24 tickUpper,
-        uint256 liquidity,
-        uint256 amount0Max,
-        uint256 amount1Max
+        uint256 liquidity
     ) external payable returns (uint256 tokenId, BalanceDelta delta) {
         IPositionManager posm = dpp.positionManager();
-        uint256 deadline = block.timestamp + 300;
+        uint256 deadline = type(uint256).max;
+        (uint256 amount0Max, uint256 amount1Max) = getAmountsForLiquidity(
+            poolKey.toId(), tickLower, tickUpper, liquidity
+        );
+        amount0Max += 1;
+        amount1Max += 1;
         _receive(poolKey.currency0, amount0Max);
         _receive(poolKey.currency1, amount1Max);
         (tokenId, delta) = posm.mint(
@@ -61,33 +101,35 @@ contract DesiredPricePoolHelper is SafeCallback {
         _send(poolKey.currency0, poolKey.currency1, amount0Max, amount1Max, delta);
     }
 
-    function burn(uint256 tokenId, uint256 amount0Min, uint256 amount1Min) external returns (BalanceDelta delta) {
+    function burn(uint256 tokenId) external returns (BalanceDelta delta) {
         (IPositionManager posm, Currency currency0, Currency currency1, bytes memory hookData, uint256 deadline) =
             _getParams(tokenId);
-        delta = posm.burn(tokenId, amount0Min, amount1Min, msg.sender, deadline, hookData);
+        IERC721(address(posm)).transferFrom(msg.sender, address(this), tokenId);
+        delta = posm.burn(tokenId, 0, 0, msg.sender, deadline, hookData);
         _send(currency0, currency1, delta);
     }
 
-    function addLiquidity(uint256 tokenId, uint256 liquidity, uint256 amount0Max, uint256 amount1Max)
-        external
-        payable
-        returns (BalanceDelta delta)
-    {
+    function addLiquidity(uint256 tokenId, uint256 liquidity) external payable borrow(tokenId) returns (BalanceDelta delta) {
         (IPositionManager posm, Currency currency0, Currency currency1, bytes memory hookData, uint256 deadline) =
             _getParams(tokenId);
+        (PoolKey memory key, PositionInfo info) = posm.getPoolAndPositionInfo(tokenId);
+        (uint256 amount0Max, uint256 amount1Max) = getAmountsForLiquidity(
+            key.toId(), info.tickLower(), info.tickUpper(), liquidity
+        );
+        amount0Max += 1;
+        amount1Max += 1;
         _receive(currency0, amount0Max);
         _receive(currency1, amount1Max);
         delta = posm.increaseLiquidity(tokenId, liquidity, amount0Max, amount1Max, deadline, hookData);
         _send(currency0, currency1, amount0Max, amount1Max, delta);
     }
 
-    function removeLiquidity(uint256 tokenId, uint256 liquidity, uint256 amount0Max, uint256 amount1Max)
-        external
-        returns (BalanceDelta delta)
-    {
+    function removeLiquidity(uint256 tokenId, uint256 liquidity) external borrow(tokenId) returns (BalanceDelta delta) {
         (IPositionManager posm, Currency currency0, Currency currency1, bytes memory hookData, uint256 deadline) =
             _getParams(tokenId);
-        delta = posm.decreaseLiquidity(tokenId, liquidity, amount0Max, amount1Max, msg.sender, deadline, hookData);
+        delta = posm.decreaseLiquidity(
+            tokenId, liquidity, type(uint256).max, type(uint256).max, msg.sender, deadline, hookData
+        );
         _send(currency0, currency1, delta);
     }
 
