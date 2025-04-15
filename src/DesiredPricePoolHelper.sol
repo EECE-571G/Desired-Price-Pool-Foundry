@@ -25,6 +25,7 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import {IDesiredPricePool} from "./interfaces/IDesiredPricePool.sol";
 import {DPPConstants} from "./libraries/DPPConstants.sol";
+import {HookData} from "./libraries/HookData.sol";
 import {EasyPosm} from "./libraries/EasyPosm.sol";
 import {SafeCast128} from "./utils/SafeCast128.sol";
 
@@ -182,7 +183,7 @@ contract DesiredPricePoolHelper is SafeCallback {
     {
         posm = dpp.positionManager();
         (currency0, currency1) = posm.getCurrencies(tokenId);
-        hookData = abi.encode(DPPConstants.HOOK_DATA_PREFIX, tokenId);
+        hookData = HookData.encodeLiquidityHookData(tokenId);
         deadline = type(uint256).max;
     }
 

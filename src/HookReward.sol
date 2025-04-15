@@ -18,6 +18,7 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 
 import {IHookReward} from "./interfaces/IHookReward.sol";
 import {DPPConstants} from "./libraries/DPPConstants.sol";
+import {HookData} from "./libraries/HookData.sol";
 import {Reward, RewardQueue} from "./types/Reward.sol";
 import {Math as Math2} from "./utils/Math.sol";
 import {DesiredPrice} from "./DesiredPrice.sol";
@@ -29,8 +30,6 @@ abstract contract HookReward is DesiredPrice, ReentrancyGuard, IHookReward {
     using CustomRevert for bytes4;
     using SafeCast for uint256;
     using SafeCast for int256;
-
-    error InvalidHookData(bytes hookData);
 
     uint24 public constant REWARD_LOCK_PERIOD = 1 days;
 
@@ -239,14 +238,7 @@ abstract contract HookReward is DesiredPrice, ReentrancyGuard, IHookReward {
         IPoolManager.ModifyLiquidityParams calldata params,
         bytes calldata hookData
     ) internal view returns (uint256 positionId) {
-        if (hookData.length != 36) {
-            revert InvalidHookData(hookData);
-        }
-        bytes4 prefix;
-        (prefix, positionId) = abi.decode(hookData, (bytes4, uint256));
-        if (prefix != DPPConstants.HOOK_DATA_PREFIX) {
-            revert InvalidHookData(hookData);
-        }
+        positionId = HookData.decodeLiquidityHookData(hookData);
         PositionInfo position = posm.positionInfo(positionId);
         bytes25 positionPoolId = position.poolId();
         if (positionPoolId != bytes25(PoolId.unwrap(id))) {
