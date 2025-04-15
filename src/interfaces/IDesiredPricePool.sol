@@ -13,4 +13,6 @@ interface IDesiredPricePool is IDesiredPrice, IHookReward, IImmutableState {
     function lpFees(PoolId id) external view returns (uint24);
 
     function hookFees(PoolId id) external view returns (uint8);
+
+    function takeHookFee(Currency currency) external returns (uint256 amount);
 }

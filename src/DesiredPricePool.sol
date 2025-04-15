@@ -7,6 +7,7 @@ import {LPFeeLibrary} from "v4-core/src/libraries/LPFeeLibrary.sol";
 import {ProtocolFeeLibrary} from "v4-core/src/libraries/ProtocolFeeLibrary.sol";
 import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
+import {TransientStateLibrary} from "v4-core/src/libraries/TransientStateLibrary.sol";
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
@@ -34,12 +35,14 @@ import {HookReward} from "./HookReward.sol";
 
 contract DesiredPricePool is IDesiredPricePool, IDesiredPricePoolOwner, HookReward, BaseHook {
     using StateLibrary for IPoolManager;
+    using TransientStateLibrary for IPoolManager;
     using PoolIdLibrary for PoolKey;
     using BalanceDeltaLibrary for BalanceDelta;
     using CustomRevert for bytes4;
     using SafeCast for uint256;
     using SafeCast for int256;
 
+    error NegativeDelta(int256 delta);
     error UnexpectedReentrancy();
     error InvalidTickRange(int24 lowerTick, int24 upperTick, int24 tickSpacing);
 
@@ -92,6 +95,17 @@ contract DesiredPricePool is IDesiredPricePool, IDesiredPricePoolOwner, HookRewa
         _setDesiredPrice(id, _desiredPriceTick);
 
         poolManager.initialize(key, _sqrtPriceX96);
+    }
+
+    function takeHookFee(Currency currency) external returns (uint256 amount) {
+        int256 delta = poolManager.currencyDelta(address(this), currency);
+        if (delta < 0) {
+            revert NegativeDelta(delta);
+        }
+        amount = delta.toUint256();
+        if (amount > 0) {
+            poolManager.take(currency, address(this), amount);
+        }
     }
 
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {

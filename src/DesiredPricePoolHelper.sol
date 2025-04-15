@@ -134,18 +134,18 @@ contract DesiredPricePoolHelper is SafeCallback {
         delta = posm.collect(tokenId, 0, 0, msg.sender, deadline, hookData);
     }
 
-    function swapExactIn(PoolKey memory poolKey, bool zeroForOne, uint256 amount, uint160 sqrtPriceLimitX96)
+    function swapExactIn(PoolKey memory poolKey, bool zeroForOne, uint256 amount)
         external
         returns (BalanceDelta delta)
     {
-        return _swap(poolKey, zeroForOne, -amount.toInt256(), sqrtPriceLimitX96);
+        return _swap(poolKey, zeroForOne, -amount.toInt256());
     }
 
-    function swapExactOut(PoolKey memory poolKey, bool zeroForOne, uint256 amount, uint160 sqrtPriceLimitX96)
+    function swapExactOut(PoolKey memory poolKey, bool zeroForOne, uint256 amount)
         external
         returns (BalanceDelta delta)
     {
-        return _swap(poolKey, zeroForOne, amount.toInt256(), sqrtPriceLimitX96);
+        return _swap(poolKey, zeroForOne, amount.toInt256());
     }
 
     function _unlockCallback(bytes calldata data) internal override returns (bytes memory) {
@@ -159,13 +159,12 @@ contract DesiredPricePoolHelper is SafeCallback {
         // Get the deltas for the currencies
         int256 delta0 = pm.currencyDelta(address(this), poolKey.currency0);
         int256 delta1 = pm.currencyDelta(address(this), poolKey.currency1);
-        int256 hookDelta0 = pm.currencyDelta(address(dpp), poolKey.currency0);
-        int256 hookDelta1 = pm.currencyDelta(address(dpp), poolKey.currency1);
         // Solve deltas
         _solve(poolKey.currency0, pm, sender, delta0);
         _solve(poolKey.currency1, pm, sender, delta1);
-        _solve(poolKey.currency0, pm, address(dpp), hookDelta0);
-        _solve(poolKey.currency1, pm, address(dpp), hookDelta1);
+        // Solve hook delta
+        Currency unspecified = params.zeroForOne == (params.amountSpecified < 0) ? poolKey.currency1 : poolKey.currency0;
+        dpp.takeHookFee(unspecified);
         return abi.encode(delta);
     }
 
@@ -203,10 +202,10 @@ contract DesiredPricePoolHelper is SafeCallback {
     }
 
     function _send(
-        Currency currency0, 
-        Currency currency1, 
-        uint256 amount0Max, 
-        uint256 amount1Max, 
+        Currency currency0,
+        Currency currency1,
+        uint256 amount0Max,
+        uint256 amount1Max,
         BalanceDelta delta
     ) internal {
         int256 excess0 = amount0Max.toInt256() + delta.amount0();
@@ -219,15 +218,16 @@ contract DesiredPricePoolHelper is SafeCallback {
         }
     }
 
-    function _swap(PoolKey memory poolKey, bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96)
+    function _swap(PoolKey memory poolKey, bool zeroForOne, int256 amountSpecified)
         internal
         returns (BalanceDelta delta)
     {
         IPoolManager pm = dpp.poolManager();
+        uint160 priceLimit = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
         IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
             zeroForOne: zeroForOne,
             amountSpecified: amountSpecified,
-            sqrtPriceLimitX96: sqrtPriceLimitX96
+            sqrtPriceLimitX96: priceLimit
         });
         bytes memory result = pm.unlock(abi.encode(msg.sender, poolKey, params));
         (delta) = abi.decode(result, (BalanceDelta));
@@ -236,7 +236,8 @@ contract DesiredPricePoolHelper is SafeCallback {
     function _solve(Currency currency, IPoolManager pm, address target, int256 delta) internal {
         if (delta < 0) {
             currency.settle(pm, target, (-delta).toUint256(), false);
-        } else if (delta > 0) {
+        }
+        else if (delta > 0) {
             currency.take(pm, target, delta.toUint256(), false);
         }
     }
