@@ -2,30 +2,27 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
-import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
+
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
-import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {CurrencyLibrary, Currency} from "v4-core/src/types/Currency.sol";
-import {LiquidityAmounts} from "v4-core/test/utils/LiquidityAmounts.sol";
 
-import {PositionInfo, PositionInfoLibrary} from "v4-periphery/src/libraries/PositionInfoLibrary.sol";
-
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import {SafeCast128} from "../src/utils/SafeCast128.sol";
+import {DesiredPricePoolHelper} from "../src/DesiredPricePoolHelper.sol";
 import {DPPTestBase} from "./DPPTestBase.sol";
 
 contract DesiredPricePoolHelperTest is DPPTestBase {
     using CurrencyLibrary for Currency;
-    using PositionInfoLibrary for PositionInfo;
-    using StateLibrary for IPoolManager;
     using SafeCast for int256;
     using SafeCast for uint256;
     using SafeCast128 for uint128;
     using SafeCast128 for int128;
 
+    DesiredPricePoolHelper dppHelper;
     uint256 tokenId;
     uint256 initialLiquidity;
     uint256 initialBalance0;
@@ -33,6 +30,13 @@ contract DesiredPricePoolHelperTest is DPPTestBase {
 
     function setUp() public override {
         super.setUp();
+
+        // Deploy and approve the helper
+        dppHelper = new DesiredPricePoolHelper(dpp);
+        IERC20(Currency.unwrap(currency0)).approve(address(dppHelper), type(uint256).max);
+        IERC20(Currency.unwrap(currency1)).approve(address(dppHelper), type(uint256).max);
+        IERC721(address(posm)).setApprovalForAll(address(dppHelper), true);
+
         // Provide full-range liquidity to the pool
         int24 tickLower = TickMath.minUsableTick(key.tickSpacing);
         int24 tickUpper = TickMath.maxUsableTick(key.tickSpacing);
