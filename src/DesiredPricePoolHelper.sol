@@ -29,6 +29,7 @@ import {HookData} from "./libraries/HookData.sol";
 import {EasyPosm} from "./libraries/EasyPosm.sol";
 import {SafeCast128} from "./utils/SafeCast128.sol";
 
+// TODO: Use delegatecall to avoid temporary transfer of tokens
 contract DesiredPricePoolHelper is SafeCallback {
     using CurrencyLibrary for Currency;
     using CurrencySettler for Currency;

@@ -19,6 +19,7 @@ struct RewardQueue {
 
 using RewardQueueLibrary for RewardQueue global;
 
+// TODO: gas optimization
 library RewardQueueLibrary {
     error QueueEmpty();
     error QueueFull();

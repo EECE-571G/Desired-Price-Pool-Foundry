@@ -23,6 +23,7 @@ import {Reward, RewardQueue} from "./types/Reward.sol";
 import {Math as Math2} from "./utils/Math.sol";
 import {DesiredPrice} from "./DesiredPrice.sol";
 
+// TODO: switch to a new mechanism similar to Uniswap's fee growth to ensure faireness and account for price changes
 abstract contract HookReward is DesiredPrice, ReentrancyGuard, IHookReward {
     using PoolIdLibrary for PoolKey;
     using BalanceDeltaLibrary for BalanceDelta;
@@ -233,6 +234,7 @@ abstract contract HookReward is DesiredPrice, ReentrancyGuard, IHookReward {
         }
     }
 
+    // TODO: use params.slat as positionId
     function _verifyPositionId(
         PoolId id,
         IPoolManager.ModifyLiquidityParams calldata params,
