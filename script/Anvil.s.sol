@@ -60,6 +60,10 @@ contract DesiredPricePoolScript is Script, DeployPermit2 {
         require(address(dpp) == hookAddress, "DesiredPricePoolScript: hook address mismatch");
         IGovernanceToken govToken = dpp.governanceToken();
 
+        // Send some tokens to the deployer for testing
+        vm.broadcast();
+        govToken.transferFrom(address(govToken), msg.sender, 100 ether);
+
         // Deploy the helper contract
         vm.broadcast();
         dppHelper = new DesiredPricePoolHelper(dpp);
