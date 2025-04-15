@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import {PoolId} from "v4-core/src/types/PoolId.sol";
 
 import {Poll} from "../libraries/Poll.sol";
-import {IGoveranceToken} from "./IGoveranceToken.sol";
+import {IGovernanceToken} from "./IGovernanceToken.sol";
 
 interface IDesiredPrice {
     error PollCurrentlyPaused(PoolId id);
@@ -26,7 +26,7 @@ interface IDesiredPrice {
 
     function desiredPrice(PoolId id) external view returns (int24);
 
-    function goveranceToken() external view returns (IGoveranceToken);
+    function governanceToken() external view returns (IGovernanceToken);
 
     function votingPowerOf(PoolId id, address from) external view returns (uint256);
 

@@ -21,37 +21,37 @@ import {PositionManager} from "v4-periphery/src/PositionManager.sol";
 import {IPositionDescriptor} from "v4-periphery/src/interfaces/IPositionDescriptor.sol";
 import {IWETH9} from "v4-periphery/src/interfaces/external/IWETH9.sol";
 
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {Arrays} from "@openzeppelin/contracts/utils/Arrays.sol";
 import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 
-import {DPPLibrary} from "../src/libraries/DPPLibrary.sol";
+import {IGovernanceToken} from "../src/interfaces/IGovernanceToken.sol";
+import {DPPConstants} from "../src/libraries/DPPConstants.sol";
 import {DesiredPricePool} from "../src/DesiredPricePool.sol";
+import {DesiredPricePoolHelper} from "../src/DesiredPricePoolHelper.sol";
 import {DeployPermit2} from "../test/utils/forks/DeployPermit2.sol";
-import {EasyPosm} from "../test/utils/EasyPosm.sol";
-
-import {BalanceDelta, BalanceDeltaLibrary} from "v4-core/src/types/BalanceDelta.sol";
 
 /// @notice Forge script for deploying v4 & hooks to **anvil**
 contract DesiredPricePoolScript is Script, DeployPermit2 {
-    using EasyPosm for IPositionManager;
-
     address constant CREATE2_DEPLOYER = address(0x4e59b44847b379578588920cA78FbF26c0B4956C);
     IPoolManager manager;
     IPositionManager posm;
-    PoolModifyLiquidityTest lpRouter;
-    PoolSwapTest swapRouter;
+    DesiredPricePoolHelper dppHelper;
 
     function setUp() public {}
 
     function run() public {
-        vm.broadcast();
+        // Deploy PoolManager and PositionManager
+        vm.startBroadcast();
         manager = deployPoolManager();
+        posm = deployPosm(manager);
+        vm.stopBroadcast();
 
         bytes memory constructorArgs = abi.encode(manager, posm, msg.sender);
         // Mine a salt that will produce a hook address with the correct permissions
         (address hookAddress, bytes32 salt) = HookMiner.find(
-            CREATE2_DEPLOYER, DPPLibrary.PERMISSION_FLAGS, type(DesiredPricePool).creationCode, constructorArgs
+            CREATE2_DEPLOYER, DPPConstants.PERMISSION_FLAGS, type(DesiredPricePool).creationCode, constructorArgs
         );
 
         // ----------------------------- //
@@ -60,17 +60,15 @@ contract DesiredPricePoolScript is Script, DeployPermit2 {
         vm.broadcast();
         DesiredPricePool dpp = new DesiredPricePool{salt: salt}(manager, posm, msg.sender);
         require(address(dpp) == hookAddress, "DesiredPricePoolScript: hook address mismatch");
-
-        // Additional helpers for interacting with the pool
-        vm.startBroadcast();
-        posm = deployPosm(manager);
-        (lpRouter, swapRouter,) = deployRouters(manager);
-        vm.stopBroadcast();
+        dppHelper = new DesiredPricePoolHelper(dpp);
+        IGovernanceToken govToken = dpp.governanceToken();
 
         // Log the addresses of the deployed contracts
-        console.log("DesiredPricePool deployed at:", address(dpp));
         console.log("PoolManager deployed at:", address(manager));
         console.log("PositionManager deployed at:", address(posm));
+        console.log("DesiredPricePool deployed at:", address(dpp));
+        console.log("GovernanceToken deployed at:", address(govToken));
+        console.log("DesiredPricePoolHelper deployed at:", address(dppHelper));
 
         // Test the lifecycle (create pool, add liquidity)
         vm.startBroadcast();
@@ -99,14 +97,6 @@ contract DesiredPricePoolScript is Script, DeployPermit2 {
         return IPositionManager(
             new PositionManager(poolManager, permit2, 300_000, IPositionDescriptor(address(0)), IWETH9(address(0)))
         );
-    }
-
-    function approvePosmCurrency(IPositionManager _posm, Currency currency) internal {
-        // Because POSM uses permit2, we must execute 2 permits/approvals.
-        // 1. First, the caller must approve permit2 on the token.
-        IERC20(Currency.unwrap(currency)).approve(address(permit2), type(uint256).max);
-        // 2. Then, the caller must approve POSM as a spender of permit2
-        permit2.approve(Currency.unwrap(currency), address(_posm), type(uint160).max, type(uint48).max);
     }
 
     function deployTokens(uint256 count) internal returns (MockERC20[] memory tokens) {
@@ -140,10 +130,9 @@ contract DesiredPricePoolScript is Script, DeployPermit2 {
         // Mint and approve the tokens
         for (uint256 i = 0; i < tokenCount; i++) {
             tokens[i].mint(msg.sender, 100_000 ether);
-            tokens[i].approve(address(lpRouter), type(uint256).max);
-            tokens[i].approve(address(swapRouter), type(uint256).max);
-            approvePosmCurrency(posm, Currency.wrap(address(tokens[i])));
+            tokens[i].approve(address(dppHelper), type(uint256).max);
         }
+        IERC721(address(posm)).setApprovalForAll(address(dppHelper), true);
 
         // Initialize pools and add full-range liquidity
         int24 tickSpacing = 64;
@@ -154,47 +143,8 @@ contract DesiredPricePoolScript is Script, DeployPermit2 {
             for (uint256 j = i + 1; j < tokenCount; j++) {
                 PoolKey memory key =
                     dpp.createPool(first, Currency.wrap(address(tokens[j])), tickSpacing, Constants.SQRT_PRICE_1_1, 0);
-                _exampleAddLiquidity(key, tickLower, tickUpper);
-                console.log("tickLower", tickLower);
-                console.log("tickLower", tickLower);
+                dppHelper.mint(key, tickLower, tickUpper, 100 ether);
             }
         }
-    }
-
-    using BalanceDeltaLibrary for BalanceDelta;
-
-    function _exampleAddLiquidity(PoolKey memory poolKey, int24 tickLower, int24 tickUpper) internal {
-        // provisions full-range liquidity twice. Two different periphery contracts used for example purposes.
-        IPoolManager.ModifyLiquidityParams memory liqParams =
-            IPoolManager.ModifyLiquidityParams(tickLower, tickUpper, 100 ether, 0);
-        lpRouter.modifyLiquidity(poolKey, liqParams, "");
-        console.log("    Liquidity added via lpRouter.");
-
-        // Using POSM to mint the actual position NFT
-        uint128 liquidityAmount = 100e18; // Example L unit amount for POSM
-        // --- No HookReward import needed if HOOK_DATA_PREFIX is not used here ---
-        // --- Empty hookData for initial mint ---
-        bytes memory hookData = ""; // why not 0x
-
-        // --- Correct variable declaration and assignment ---
-        uint256 tokenId;        // To store the first return value
-        BalanceDelta amounts;   // To store the second return value
-        
-        console.log("    Liquidity mint starts");
-
-        (tokenId, amounts) = posm.mint(
-                poolKey,
-                tickLower,
-                tickUpper,
-                100e18, //liquidityAmount
-                10_000e18, // amount0Min example
-                10_000e18, // amount1Min example
-                msg.sender, // Mint NFT to the user/deployer
-                block.timestamp + 300,
-                hookData
-            );
-        console.log("    Liquidity added via posm. TokenId:", tokenId);
-        console.log("      Amount0 Delta (from posm.mint):", amounts.amount0());
-        console.log("      Amount1 Delta (from posm.mint):", amounts.amount1());
     }
 }

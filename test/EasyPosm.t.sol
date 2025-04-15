@@ -14,10 +14,10 @@ import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
 import {LiquidityAmounts} from "v4-core/test/utils/LiquidityAmounts.sol";
 
 import {IPositionManager} from "v4-periphery/src/interfaces/IPositionManager.sol";
-import {EasyPosm} from "./EasyPosm.sol";
-import {Fixtures} from "./Fixtures.sol";
+import {EasyPosm} from "../src/libraries/EasyPosm.sol";
+import {Fixtures} from "./utils/Fixtures.sol";
 
-contract CounterTest is Test, Fixtures {
+contract EasyPosmTest is Test, Fixtures {
     using EasyPosm for IPositionManager;
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
