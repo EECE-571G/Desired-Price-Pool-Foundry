@@ -139,16 +139,17 @@ contract DesiredPricePoolScript is Script, DeployPermit2 {
         }
         IERC721(address(posm)).setApprovalForAll(address(dppHelper), true);
 
-        // Initialize pools and add full-range liquidity
+        // Initialize pools, add full-range liquidity, and start polls
         int24 tickSpacing = 64;
         int24 tickLower = TickMath.minUsableTick(tickSpacing);
         int24 tickUpper = TickMath.maxUsableTick(tickSpacing);
         for (uint256 i = 0; i < tokenCount - 1; i++) {
             Currency first = Currency.wrap(address(tokens[i]));
             for (uint256 j = i + 1; j < tokenCount; j++) {
-                PoolKey memory key =
-                    dpp.createPool(first, Currency.wrap(address(tokens[j])), tickSpacing, Constants.SQRT_PRICE_1_1, 0);
+                Currency second = Currency.wrap(address(tokens[j]));
+                PoolKey memory key = dpp.createPool(first, second, tickSpacing, Constants.SQRT_PRICE_1_1, 0);
                 dppHelper.mint(key, tickLower, tickUpper, 100 ether);
+                dpp.startPoll(key.toId());
             }
         }
     }
