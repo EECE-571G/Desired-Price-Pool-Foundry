@@ -32,7 +32,15 @@ interface IDesiredPrice {
 
     function getDelegation(PoolId id, address from, address to) external view returns (uint256);
 
-    function hasVoted(PoolId id, address voter) external view returns (bool);
+    function voteTimeOf(PoolId id, address voter) external view returns (uint40);
+
+    function pollId(PoolId id) external view returns (uint16);
+
+    function pollPaused(PoolId id) external view returns (bool);
+
+    function pollWillPause(PoolId id) external view returns (bool);
+
+    function pollCurrentInfo(PoolId id) external view returns (Poll.CurrentInfo memory);
 
     function delegateVote(PoolId id, address to, uint128 power) external;
 
@@ -44,5 +52,5 @@ interface IDesiredPrice {
 
     function castVote(PoolId id, int8 slot) external;
 
-    function execute(PoolId id) external;
+    function execute(PoolId id) external returns (Poll.Result result);
 }

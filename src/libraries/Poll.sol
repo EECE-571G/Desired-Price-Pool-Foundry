@@ -59,6 +59,17 @@ library Poll {
         int128[VOTE_SLOTS] voteDiffs;
     }
 
+    struct CurrentInfo {
+        uint16 id;
+        uint40 startTime;
+        uint40 currentTime;
+        bool isMajor;
+        Stage stage;
+        Result result;
+        uint128 totalVotes;
+        uint128[VOTE_SLOTS] votes;
+    }
+
     function verifyVoteRange(int8 lowerSlot, int8 upperSlot) internal pure {
         if (lowerSlot < -VOTE_RANGE || upperSlot > VOTE_RANGE + 1 || lowerSlot >= upperSlot) {
             revert InvalidVoteSlotRange(lowerSlot, upperSlot);
@@ -136,16 +147,31 @@ library Poll {
         if (stage != Stage.PreExecution && stage != Stage.ExecutionReady) {
             return (Result.NotReady, 0);
         }
-        (int8 highestSlot, uint128 highestAmount) = self.count();
+        (int8 highestSlot, uint128 highestAmount,) = self.count();
         result = calculateResult(highestSlot, highestAmount, self.totalVotes);
         tickDelta = (result == Result.MoveDown || result == Result.MoveUp) ? self.slotToTickDelta(highestSlot) : int24(0);
+    }
+
+    function getCurrentInfo(State storage self) internal view returns (CurrentInfo memory info) {
+        info.id = self.id;
+        info.startTime = self.startTime;
+        info.currentTime = uint40(block.timestamp);
+        info.isMajor = self.isMajorPoll();
+        info.stage = self.getStage();
+        info.totalVotes = self.totalVotes;
+        int8 highestSlot;
+        uint128 highestAmount;
+        (highestSlot, highestAmount, info.votes) = self.count();
+        info.result = (info.stage != Stage.PreExecution && info.stage != Stage.ExecutionReady) 
+            ? Result.NotReady
+            : calculateResult(highestSlot, highestAmount, self.totalVotes);
     }
 
     function slotToTickDelta(State storage self, int8 voteSlot) internal view returns (int24) {
         if (voteSlot == 0) {
             return 0;
         }
-        // Major poll: linear, 5.0% * slot, max 100%
+        // Major poll: linear, 5.0% * slot, max 50%
         if (self.isMajorPoll()) {
             return int24(voteSlot) * 500;
         }
@@ -200,25 +226,27 @@ library Poll {
         }
     }
 
-    function count(State storage self) internal view returns (int8 highestSlot, uint128 highestAmount) {
+    function count(State storage self)
+        internal
+        view
+        returns (int8 highestSlot, uint128 highestAmount, uint128[VOTE_SLOTS] memory votes)
+    {
         if (self.totalVotes == 0) {
-            return (0, 0);
+            return (0, 0, votes);
         }
-        int128[VOTE_SLOTS] memory amountDiffs = self.voteDiffs;
         uint8 highestSlotRaw = 0;
-        int128 currentAmount = 0;
         int8 offset = VOTE_RANGE;
         for (uint8 i = 0; i < VOTE_SLOTS; i++) {
-            currentAmount += amountDiffs[i];
-            if (uint128(currentAmount) < highestAmount) {
+            votes[i] = uint128(i == 0 ? self.voteDiffs[i] : int128(votes[i - 1]) + self.voteDiffs[i]);
+            if (uint128(votes[i]) < highestAmount) {
                 continue;
             }
             int8 curOffset = Math.abs8(int8(i) - VOTE_RANGE);
-            if (uint128(currentAmount) == highestAmount && curOffset >= offset) {
+            if (uint128(votes[i]) == highestAmount && curOffset >= offset) {
                 continue;
             }
             highestSlotRaw = i;
-            highestAmount = uint128(currentAmount);
+            highestAmount = uint128(votes[i]);
             offset = curOffset;
         }
         highestSlot = int8(highestSlotRaw) - VOTE_RANGE;

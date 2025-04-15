@@ -62,9 +62,24 @@ abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, Context, Ow
         return voteInfos[id][from].delegation[to];
     }
 
-    function hasVoted(PoolId id, address voter) external view returns (bool) {
-        uint16 pollId = polls[id].id;
-        return voteInfos[id][voter].hasVotedFor(pollId);
+    function voteTimeOf(PoolId id, address voter) external view returns (uint40) {
+        return voteInfos[id][voter].voteTimeOf(polls[id].id);
+    }
+
+    function pollId(PoolId id) external view returns (uint16) {
+        return polls[id].id;
+    }
+
+    function pollPaused(PoolId id) external view returns (bool) {
+        return polls[id].isPaused();
+    }
+
+    function pollWillPause(PoolId id) external view returns (bool) {
+        return polls[id].pauseRequested;
+    }
+
+    function pollCurrentInfo(PoolId id) external view returns (Poll.CurrentInfo memory) {
+        return polls[id].getCurrentInfo();
     }
 
     function startPoll(PoolId id) external onlyOwner {
@@ -112,8 +127,8 @@ abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, Context, Ow
         _castVote(id, _msgSender(), slot, slot + 1);
     }
 
-    function execute(PoolId id) external {
-        _execute(id);
+    function execute(PoolId id) external returns (Poll.Result result) {
+        return _execute(id);
     }
 
     function _setDesiredPrice(PoolId id, int24 priceTick) internal {
@@ -210,15 +225,15 @@ abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, Context, Ow
         return true;
     }
 
-    function _execute(PoolId id) internal whenPollNotPaused(id) {
+    function _execute(PoolId id) internal whenPollNotPaused(id) returns (Poll.Result) {
         Poll.State storage poll = polls[id];
         if (poll.getStage() != Poll.Stage.ExecutionReady) {
             ExecutionNotReady.selector.revertWith();
         }
-        _executePoll(id, poll);
+        return _executePoll(id, poll);
     }
 
-    function _executePoll(PoolId id, Poll.State storage poll) private {
+    function _executePoll(PoolId id, Poll.State storage poll) private returns (Poll.Result) {
         (Poll.Result result, int24 tickDelta) = poll.getResult();
         if (tickDelta != 0) {
             int24 currentTick = desiredPrice[id];
@@ -229,5 +244,6 @@ abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, Context, Ow
         if (res == Poll.StartPauseResult.Paused) {
             emit PollPaused(id, poll.id, block.timestamp.toUint40());
         }
+        return result;
     }
 }
