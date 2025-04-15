@@ -7,10 +7,10 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC20Pausable} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Pausable.sol";
 import {Owned} from "solmate/src/auth/Owned.sol";
 
-import {IGoveranceToken} from "./interfaces/IGoveranceToken.sol";
-import {IGoveranceTokenOwner} from "./interfaces/IGoveranceTokenOwner.sol";
+import {IGovernanceToken} from "./interfaces/IGovernanceToken.sol";
+import {IGovernanceTokenOwner} from "./interfaces/IGovernanceTokenOwner.sol";
 
-contract GoveranceToken is IGoveranceToken, IGoveranceTokenOwner, ERC20Pausable, Owned {
+contract GovernanceToken is IGovernanceToken, IGovernanceTokenOwner, ERC20Pausable, Owned {
     using CustomRevert for bytes4;
 
     error BalanceLocked(uint256 totalLockedBalance);

@@ -11,12 +11,12 @@ import {Owned} from "solmate/src/auth/Owned.sol";
 
 import {IDesiredPrice} from "./interfaces/IDesiredPrice.sol";
 import {IDesiredPriceOwner} from "./interfaces/IDesiredPriceOwner.sol";
-import {IGoveranceToken} from "./interfaces/IGoveranceToken.sol";
+import {IGovernanceToken} from "./interfaces/IGovernanceToken.sol";
 import {Poll} from "./libraries/Poll.sol";
 import {PriceUpdate} from "./types/PriceUpdate.sol";
 import {VoteInfo} from "./types/VoteInfo.sol";
 import {SafeCast128} from "./utils/SafeCast128.sol";
-import {GoveranceToken} from "./GoveranceToken.sol";
+import {GovernanceToken} from "./GovernanceToken.sol";
 
 abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, Context, Owned {
     using PoolIdLibrary for PoolKey;
@@ -29,7 +29,7 @@ abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, Context, Ow
 
     uint40 internal constant UNDELEGATE_DELAY = 1 days;
 
-    GoveranceToken internal immutable govToken;
+    GovernanceToken internal immutable govToken;
 
     mapping(PoolId => mapping(address => VoteInfo)) internal voteInfos;
     mapping(PoolId => Poll.State) internal polls;
@@ -39,7 +39,7 @@ abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, Context, Ow
     mapping(PoolId => mapping(uint24 => PriceUpdate)) internal priceUpdates;
 
     constructor(address _owner) Owned(_owner) {
-        govToken = new GoveranceToken(_owner);
+        govToken = new GovernanceToken(_owner);
     }
 
     modifier whenPollNotPaused(PoolId id) {
@@ -50,7 +50,7 @@ abstract contract DesiredPrice is IDesiredPrice, IDesiredPriceOwner, Context, Ow
         _;
     }
 
-    function goveranceToken() external view returns (IGoveranceToken) {
+    function governanceToken() external view returns (IGovernanceToken) {
         return govToken;
     }
 

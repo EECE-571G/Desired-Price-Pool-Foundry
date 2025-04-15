@@ -25,6 +25,7 @@ import {Arrays} from "@openzeppelin/contracts/utils/Arrays.sol";
 import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 
+import {IGovernanceToken} from "../src/interfaces/IGovernanceToken.sol";
 import {DPPConstants} from "../src/libraries/DPPConstants.sol";
 import {DesiredPricePool} from "../src/DesiredPricePool.sol";
 import {DesiredPricePoolHelper} from "../src/DesiredPricePoolHelper.sol";
@@ -59,11 +60,13 @@ contract DesiredPricePoolScript is Script, DeployPermit2 {
         DesiredPricePool dpp = new DesiredPricePool{salt: salt}(manager, posm, msg.sender);
         require(address(dpp) == hookAddress, "DesiredPricePoolScript: hook address mismatch");
         dppHelper = new DesiredPricePoolHelper(dpp);
+        IGovernanceToken govToken = dpp.governanceToken();
 
         // Log the addresses of the deployed contracts
         console.log("PoolManager deployed at:", address(manager));
         console.log("PositionManager deployed at:", address(posm));
         console.log("DesiredPricePool deployed at:", address(dpp));
+        console.log("GovernanceToken deployed at:", address(govToken));
         console.log("DesiredPricePoolHelper deployed at:", address(dppHelper));
 
         // Test the lifecycle (create pool, add liquidity)
