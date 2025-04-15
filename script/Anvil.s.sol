@@ -54,14 +54,15 @@ contract DesiredPricePoolScript is Script, DeployPermit2 {
             CREATE2_DEPLOYER, DPPConstants.PERMISSION_FLAGS, type(DesiredPricePool).creationCode, constructorArgs
         );
 
-        // ----------------------------- //
-        // Deploy the hook using CREATE2 //
-        // ----------------------------- //
+        // Deploy the hook using CREATE2
         vm.broadcast();
         DesiredPricePool dpp = new DesiredPricePool{salt: salt}(manager, posm, msg.sender);
         require(address(dpp) == hookAddress, "DesiredPricePoolScript: hook address mismatch");
-        dppHelper = new DesiredPricePoolHelper(dpp);
         IGovernanceToken govToken = dpp.governanceToken();
+
+        // Deploy the helper contract
+        vm.broadcast();
+        dppHelper = new DesiredPricePoolHelper(dpp);
 
         // Log the addresses of the deployed contracts
         console.log("PoolManager deployed at:", address(manager));
