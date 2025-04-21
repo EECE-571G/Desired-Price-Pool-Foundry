@@ -103,7 +103,7 @@ The helper contract simplifies user interactions:
     *   Using the `borrow` modifier to temporarily hold the user's position NFT.
 *   **Swaps:** `swapExactIn` and `swapExactOut` initiate swaps via `PoolManager.unlock`. The logic is handled in the `_unlockCallback`, which executes the swap, settles currency deltas (`_solve`), and allows the `DesiredPricePool` hook to take its fee (`dpp.takeHookFee`).
 
-## Getting Started / Usage (Conceptual)
+## Getting Started / Usage
 
 1.  **Deployment:** Deploy `DesiredPricePool` (which deploys `GovernanceToken`). Deploy `DesiredPricePoolHelper`.
 2.  **Pool Creation:** The owner calls `DesiredPricePool.createPool` to initialize a new Uniswap V4 pool with the DPP hook, setting the initial desired price.
@@ -121,16 +121,6 @@ The helper contract simplifies user interactions:
     *   Cast votes during active poll periods using `DesiredPricePool.castVote(...)`.
     *   Anyone can trigger poll execution (if ready) by calling `DesiredPricePool.execute(...)` or interacting with the pool if `FLAG_IN_TIME_EXECUTION` is set.
 
-## Security Considerations
-
-*   The code includes reentrancy guards (`HookReward`).
-*   Ownership controls critical functions like pausing the token, creating pools, and managing polls.
-*   Uses SafeCast for type conversions.
-*   **Audits:** This code has NOT been professionally audited. Use with extreme caution. Complex interactions between hooks, governance, and rewards require thorough security reviews.
-
-## Future Work / TODOs
-
-
 ## License
 
-This project primarily uses the MIT license, as indicated by the SPDX identifiers in most files. Note that `libraries/EasyPosm.sol` uses GPL-2.0-or-later. Ensure compliance with both licenses if reusing components.
+This project is licensed under the GPL-3.0 License. See the [LICENSE](LICENSE) file for details.
